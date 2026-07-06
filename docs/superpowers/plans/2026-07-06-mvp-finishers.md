@@ -377,12 +377,12 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                             *( [f"crop {crop}"] if crop else [] ),
                             f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
             run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
-                                 str(bge_out), gpu=True), bge_out, runner=runner)
+                                 str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
         stages.append(Stage("bge", _bge, lambda: _nonzero(f"{bge_out}.fits")))
 
         def _denoise():
             run_graxpert(denoise_cmd(graxpert_exe, f"{bge_out}.fits", str(clean),
-                                     gpu=True, strength=0.8), clean, runner=runner)
+                                     gpu=True, strength=0.8), clean, runner=runner, settle=3.0)
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
