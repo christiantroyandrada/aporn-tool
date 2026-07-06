@@ -4,8 +4,29 @@ from pathlib import Path
 from astropy.io import fits
 from aporntool.stages.reflection_finish import (
     mtf, autostretch, screen_blend, fix_starnet_grid,
-    save_deliverables, run_reflection_finish,
+    save_deliverables, run_reflection_finish, desaturate_background,
 )
+
+
+def test_desaturate_background_neutralizes_dark_colored_noise():
+    # A dark bluish pixel (low luminance = sky noise) should collapse to neutral gray.
+    dark_blue = np.array([[[0.02, 0.02, 0.10]]])
+    out = desaturate_background(dark_blue, threshold=0.12, softness=0.12)
+    assert abs(out[0, 0, 2] - out[0, 0, 0]) < 0.01     # blue ≈ red -> neutral
+
+
+def test_desaturate_background_keeps_bright_color():
+    # A bright blue pixel (the nebula) must keep its colour.
+    bright_blue = np.array([[[0.20, 0.20, 0.80]]])
+    out = desaturate_background(bright_blue, threshold=0.12, softness=0.12)
+    assert (out[0, 0, 2] - out[0, 0, 0]) > 0.4         # still clearly blue
+
+
+def test_desaturate_background_preserves_luminance():
+    # Desaturation only touches chroma; per-pixel channel mean (luminance) is unchanged.
+    x = np.array([[[0.02, 0.02, 0.10]], [[0.20, 0.20, 0.80]]])
+    out = desaturate_background(x, threshold=0.12, softness=0.12)
+    assert np.allclose(out.mean(2), x.mean(2), atol=1e-9)
 
 
 def test_mtf_endpoints():

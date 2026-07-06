@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.2 — 2026-07-07
+
+- **Cleaner reflection backgrounds.** Added selective background desaturation to the reflection
+  finish: the global blue boost that makes the nebula pop no longer floods the sky with blue
+  speckle — low-signal pixels fade to neutral black while the nebula keeps its colour. (New
+  `desaturate_background`; defaults `bg_desat=0.14`, `bg_desat_soft=0.14`.)
+- **`--version` is now correct.** It read a hardcoded string that was never bumped (so 0.3.0/0.3.1
+  both reported `0.2.0`); it now derives from the installed package metadata and can't drift again.
+
 ## v0.3.1 — 2026-07-07
 
 Maintenance release — no functional changes.

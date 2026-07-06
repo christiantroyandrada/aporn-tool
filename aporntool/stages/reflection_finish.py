@@ -109,6 +109,18 @@ def darken_background(rgb, bgpull, gamma):
     return np.clip(np.clip(mtf(find_m(med, bgpull), rgb), 0, 1) ** gamma, 0, 1)
 
 
+def desaturate_background(rgb, threshold, softness):
+    # Selective background desaturation: fade chroma to neutral in low-signal pixels so the coloured
+    # sky noise (the blue×4.5 boost amplifies it everywhere) collapses to clean neutral black, while
+    # brighter pixels — the nebula and stars — keep full colour. Luminance is untouched; only the
+    # per-pixel colour-vs-grey distance is scaled by a smooth ramp: 0 below `threshold` (grey),
+    # rising to 1 by `threshold + softness` (full colour).
+    rgb = np.clip(np.asarray(rgb, np.float64), 0, 1)
+    L = rgb.mean(2, keepdims=True)
+    w = np.clip((L - threshold) / max(softness, 1e-6), 0.0, 1.0)
+    return np.clip(L + (rgb - L) * w, 0, 1)
+
+
 def process_stars(stars, brightness, saturation):
     # Star layer: boost colour + nonlinear brightness curve + a tight two-scale bloom.
     st = np.clip(np.asarray(stars, np.float64), 0, 1)
@@ -122,6 +134,7 @@ def process_stars(stars, brightness, saturation):
 
 REFLECTION_DEFAULTS = dict(target_bg=0.35, sat_r=0.30, sat_g=1.3, sat_b=4.5,
                            midboost=0.55, lc=1.3, bgpull=0.08, gamma=0.85,
+                           bg_desat=0.14, bg_desat_soft=0.14,
                            st_bright=1.5, st_sat=1.2)
 
 
@@ -151,6 +164,8 @@ def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subproces
     sl = midtone_boost(sl, p["midboost"])
     sl = local_contrast(sl, p["lc"])
     sl = darken_background(sl, p["bgpull"], p["gamma"])
+    # Kill the coloured sky noise the global blue boost amplified, keeping the nebula's colour.
+    sl = desaturate_background(sl, p["bg_desat"], p["bg_desat_soft"])
     st = process_stars(stars, p["st_bright"], p["st_sat"])
     combined = screen_blend(sl, st)
     save_deliverables(combined, out_stem)
