@@ -382,8 +382,11 @@ stack and your originals are never overwritten.
 **Can I re-process without re-stacking?** Yes — that's the point of the golden anchor. Tweak a
 finishing parameter and re-run; only `finish` (or the changed stage onward) recomputes.
 
-**It didn't crop the mosaic tightly.** Auto-crop is deliberately conservative (it never cuts faint
-data). Pass an explicit `--crop "X Y W H"`, or do the final crop by hand in Canva/Photoshop.
+**It didn't crop the mosaic tightly.** Auto-crop trims the black/near-empty borders, but it
+thresholds on brightness rather than per-pixel coverage, so a **noisy low-coverage band can survive
+on mosaics** (those edge pixels are normalized to near the sky level). Pass an explicit
+`--crop "X Y W H"`, or do the final crop by hand in Canva/Photoshop. Tighter mosaic cropping is on
+the roadmap.
 
 **Which mode for the Pleiades (M45)?** It's an open cluster in blue reflection nebulosity — use
 `dso-reflection-nebula`, not the plain cluster finish.
@@ -402,7 +405,7 @@ data). Pass an explicit `--crop "X Y W H"`, or do the final crop by hand in Canv
 | `--out path must not contain spaces` | Choose a space-free output folder (SIRIL limitation). |
 | `golden anchor not found` on `--from`/`--redo` | Run the full pipeline first (drop `--from`/`--redo`) so preprocess produces the anchor. |
 | Plate-solving fails on a mosaic | Ensure SIRIL's astrometry catalog is installed; the tool verifies solves by frame count, not exit code. |
-| Faint colour fringe left after auto-crop | Expected on noisy mosaic edges — use `--crop`, or finish the crop in post. |
+| Noisy/ragged band left after auto-crop | Known mosaic limitation (brightness-based crop misses low-coverage edges) — pass `--crop "X Y W H"`, or crop in post. |
 
 Every stage saves its SIRIL script and stdout under `_work/<target>/logs/` — check `<stage>.log`
 for the exact tool error.
@@ -415,7 +418,8 @@ for the exact tool error.
   without adding real detail).
 - **The last 5%** — final crop, curves, watermark — is done by hand from the 16-bit TIFF.
 - **Planetary** needs a manual AutoStakkert stacking step (no usable CLI) and is not yet shipped.
-- **Auto-crop is conservative** and may leave a thin edge fringe on irregular mosaics.
+- **Auto-crop** trims black borders but can leave a noisy low-coverage band on mosaics (it crops by
+  brightness, not coverage) — tighten with `--crop` or in post; a coverage-aware crop is planned.
 
 ---
 
