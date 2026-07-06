@@ -158,6 +158,27 @@ synthetic-L) — flagged, not hidden.
 
 - **FR-10** Built-in target catalog (§9): name → RA/DEC, companions, per-target notes. Unknown target →
   require `--coords RA,DEC`.
+- **FR-10a** **Auto-detect mode from FITS headers** (`aporntool auto --in … --out …`, or `--target auto`
+  on any mode). Inspect the headers of a sample of subs to *propose* the pipeline, target, coords,
+  mosaic-flag, and filter — so the user need not know which mode to run. Detection ladder:
+  1. `OBJECT` keyword → normalize → catalog lookup → **mode + RA/DEC** (highest confidence).
+  2. else `OBJCTRA`/`OBJCTDEC` (or `RA`/`DEC`) → nearest known catalog target within a tolerance.
+  3. **Mosaic detection (orthogonal to type, computed from the data):** angular spread of pointing
+     across *all* subs; if it exceeds ~1 Seestar FOV (≈1.3°×0.7° at 150 mm / IMX662), route to
+     `dso-mosaic` (WCS assembly) regardless of object type — this is the "galaxy + mosaic" case; else
+     single-panel.
+  4. `FILTER` keyword → broadband (IRCUT / UV-IR) vs LP / duo-band → picks emission broadband-vs-HOO.
+  5. `INSTRUME`/`TELESCOP` → confirm Seestar → focal/pixel defaults (FR-11).
+  - **Always print the detection + its reasons and let the user confirm/override** — never silently
+    commit to a guess. If unresolved, fall back to the interactive prompt **pre-filled** with the best
+    guess (e.g. *"Detected OBJECT=M8 → emission nebula, broadband, single-panel. Use
+    dso-emission-nebula? [Y/n]"*).
+  - **Honest limit:** the galaxy / emission / reflection / cluster *type* for a target **not** in the
+    catalog is **not** present in a Seestar header — it comes from the catalog match, or an *optional
+    offline SIMBAD/NED object-type lookup* (deferred, see O4). Mosaic-vs-single and broadband-vs-duoband
+    ARE derivable from the data; object *type* is not. **No image-content guessing.**
+  - New module `aporntool/detect.py` → `detect_mode(sub_paths) -> Detection(mode, target, coords,
+    is_mosaic, filter, confidence, reasons)`. **First feature to need `astropy`** (FITS header read).
 - **FR-11** Seestar defaults baked in: focal 150 mm, pixel 2.9 µm — overridable.
 
 ### 4.4 Pipeline execution (per mode)
@@ -542,6 +563,8 @@ illustrative and the **manifest is the source of truth**. Handling multiple targ
 | O1 | Disk / cleanup policy | **✅ LOCKED** — always keep the golden anchor + deliverables; `aporntool --clean` purges the big `01_process` seq after a successful finish (never automatic). |
 | O2 | Multi-target under one `--out` | **✅ LOCKED** — namespace `_work/<target>/`; deliverables sit side by side at the `--out` root, each target with its own manifest. |
 | O3 | MVP nebula boundary | **✅ LOCKED** — Route A (broadband+SPCC) + reflection dual-layer + star-cluster; defer M42-HDR, dual-band HOO, JPEG-salvage to Phase 3. |
+| D8 | Auto-detect mode (FR-10a) | **Added** — `auto` mode reads FITS headers → proposes pipeline/target/mosaic/filter, user confirms. New `detect.py`; needs `astropy`. |
+| O4 | Unknown-target type classification | **🔶 OPEN** — for targets NOT in the catalog: (a) catalog + coordinate match + mosaic/filter only *(recommended for now)*; (b) add an offline SIMBAD/NED object-type lookup later. No image-content guessing either way. |
 
 ---
 
