@@ -9,7 +9,8 @@ dependencies = [
     "scipy",
     "Pillow",
     "tifffile",
-]                                       # numpy/scipy power the reflection dual-layer finish; astropy/Pillow/tifffile handle deliverable I/O
+    "imagecodecs",
+]                                       # numpy/scipy power the reflection dual-layer finish; astropy/Pillow/tifffile handle deliverable I/O; imagecodecs lets tifffile decode StarNet's LZW-compressed TIFFs
 
 [project.scripts]
 aporntool = "aporntool.cli:main"       # installs an `aporntool` command
