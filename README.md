@@ -94,14 +94,31 @@ never hard-code paths.
 
 ## Installation
 
+**Already have Python 3.10+?** Install from PyPI:
+
 ```bash
+pip install aporn-tool
+```
+
+That gives you the `aporn-tool` command. `python -m aporntool` also works as a module fallback
+(the Python module keeps the one-word name — module names can't contain hyphens), and an `aporntool`
+alias command is installed too, so either spelling runs.
+
+<details>
+<summary>Or install from source (for development / latest main)</summary>
+
+```bash
+git clone https://github.com/christiantroyandrada/aporn-tool.git
+cd aporn-tool
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 # Windows: .venv\Scripts\python -m pip install -e .
 ```
 
-This installs an `aporntool` command into the venv. Activate the venv (or call
-`.venv/bin/aporntool`) to use it.
+</details>
+
+> Installing the Python package does **not** install Siril/GraXpert/StarNet — those are separate
+> apps (see [Prerequisites](#prerequisites)). Run `aporn-tool config --check` to confirm they're found.
 
 ---
 
@@ -110,7 +127,7 @@ This installs an `aporntool` command into the venv. Activate the venv (or call
 Run the discovery check — it prints where each tool was found and writes a starter config:
 
 ```bash
-aporntool config --check
+aporn-tool config --check
 ```
 
 Then complete the three one-time setup steps (the tool's preflight checks the ones it can):
@@ -128,7 +145,7 @@ Then complete the three one-time setup steps (the tool's preflight checks the on
 Validate everything without processing:
 
 ```bash
-aporntool dso-mosaic --in "/path/to/subs" --out /path/to/out --target M31 --preflight-only
+aporn-tool dso-mosaic --in "/path/to/subs" --out /path/to/out --target M31 --preflight-only
 ```
 
 ---
@@ -142,7 +159,7 @@ read from the subs' FITS header, and the results land in a folder named after th
 beside your subs:
 
 ```bash
-aporntool dso-mosaic --in "/path/to/M31 subs"
+aporn-tool dso-mosaic --in "/path/to/M31 subs"
 ```
 
 Produces `M31_final.tif` (16-bit — the real deliverable), `.png`, `.jpg` (quick-look), and `.fits`
@@ -158,9 +175,9 @@ location.
 ### 2. Other modes
 
 ```bash
-aporntool dso-emission-nebula   --in "/data/M8"
-aporntool dso-reflection-nebula --in "/data/M78"
-aporntool dso-star-cluster      --in "/data/M13"
+aporn-tool dso-emission-nebula   --in "/data/M8"
+aporn-tool dso-reflection-nebula --in "/data/M78"
+aporn-tool dso-star-cluster      --in "/data/M13"
 ```
 
 ### 3. Combine multiple nights (more integration = the #1 quality lever)
@@ -168,7 +185,7 @@ aporntool dso-star-cluster      --in "/data/M13"
 `--in` is repeatable; all `.fit` from every source are staged and stacked together:
 
 ```bash
-aporntool dso-mosaic \
+aporn-tool dso-mosaic \
   --in "/data/M31/2026-07-04" \
   --in "/data/M31/2026-07-05" \
   --out /data/out --target M31
@@ -180,8 +197,8 @@ Nothing special needed — the coordinates come from your subs' FITS header, so 
 (VdB 106, Sh2-155, …) just work. Pass `--target` only when you want a custom output name:
 
 ```bash
-aporntool dso-reflection-nebula --in "/data/vdb106"
-aporntool dso-emission-nebula   --in "/data/sh2-155" --target Sh2-155
+aporn-tool dso-reflection-nebula --in "/data/vdb106"
+aporn-tool dso-emission-nebula   --in "/data/sh2-155" --target Sh2-155
 ```
 
 ### 5. Control the crop
@@ -190,10 +207,10 @@ Auto-crop (default) trims empty registration/mosaic borders. Override it:
 
 ```bash
 # keep the full frame (no crop)
-aporntool dso-mosaic --in "/data/M31" --out /data/out --target M31 --no-crop
+aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --no-crop
 
 # explicit SIRIL crop box: X Y W H (x from left, y from top)
-aporntool dso-mosaic --in "/data/M31" --out /data/out --target M31 --crop "162 108 2310 4378"
+aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --crop "162 108 2310 4378"
 ```
 
 ### 6. Check status and resume
@@ -202,7 +219,7 @@ Re-running the **same command auto-resumes** at the first unfinished stage — n
 repeated. Inspect the ledger any time:
 
 ```bash
-aporntool status --out /data/out --target M31
+aporn-tool status --out /data/out --target M31
 ```
 ```
 dso-mosaic / M31  (fingerprint 8cd20ff7d100564d)
@@ -220,19 +237,19 @@ Resume at: finish
 
 ```bash
 # redo colour calibration and everything after it (e.g. once the right Gaia region is installed)
-aporntool dso-mosaic --in "/data/M31" --out /data/out --target M31 --redo spcc
+aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --redo spcc
 
 # restart at a named stage
-aporntool dso-mosaic --in "/data/M31" --out /data/out --target M31 --from finish
+aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --from finish
 
 # ignore all checkpoints and re-run everything
-aporntool dso-mosaic --in "/data/M31" --out /data/out --target M31 --force
+aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --force
 ```
 
 ### 8. The advanced, fully-specified run
 
 ```bash
-aporntool dso-mosaic \
+aporn-tool dso-mosaic \
   --in "/data/M31/2026-07-04" --in "/data/M31/2026-07-05" \
   --out /data/out \
   --target M31 \
@@ -252,7 +269,7 @@ aporntool dso-mosaic \
 ## Command reference
 
 ```
-aporntool <command> [options]
+aporn-tool <command> [options]
 ```
 
 | Command | Purpose |
@@ -287,7 +304,7 @@ FITS header automatically.
 
 ## Stages & resume
 
-Stage names are **per-mode** — run `aporntool status` to see yours. Current orders:
+Stage names are **per-mode** — run `aporn-tool status` to see yours. Current orders:
 
 | Mode | Stages (what `--from` / `--redo` accept) |
 |------|------------------------------------------|
@@ -328,7 +345,7 @@ the root.
 
 ## Configuration file
 
-`aporntool config --check` writes `aporntool.config.json`. Edit it to pin tool paths or set the
+`aporn-tool config --check` writes `aporntool.config.json`. Edit it to pin tool paths or set the
 local Gaia catalogs:
 
 ```json

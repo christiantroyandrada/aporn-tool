@@ -1,8 +1,20 @@
 [project]
-name = "aporntool"
-version = "0.2.0"
+name = "aporn-tool"                     # PyPI distribution name (pip install aporn-tool); the import package + command stay `aporntool`
+version = "0.3.0"
 description = "Astropornography tool — one command from raw subs to a finished astrophoto"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "christiantroyandrada" }]
+keywords = ["astrophotography", "astronomy", "seestar", "siril", "graxpert", "starnet", "deep-sky", "dso"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Multimedia :: Graphics",
+]
 dependencies = [
     "numpy",
     "astropy",
@@ -13,11 +25,20 @@ dependencies = [
 ]                                       # numpy/scipy power the reflection dual-layer finish; astropy/Pillow/tifffile handle deliverable I/O; imagecodecs lets tifffile decode StarNet's LZW-compressed TIFFs
 
 [project.scripts]
-aporntool = "aporntool.cli:main"       # installs an `aporntool` command
+aporn-tool = "aporntool.cli:main"      # the command, matching the pip name (`aporn-tool ...`)
+aporntool = "aporntool.cli:main"       # kept as an alias so the one-word name still works
+
+[project.urls]
+Homepage = "https://github.com/christiantroyandrada/aporn-tool"
+Changelog = "https://github.com/christiantroyandrada/aporn-tool/blob/main/CHANGELOG.md"
+Issues = "https://github.com/christiantroyandrada/aporn-tool/issues"
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aporntool*"]                # ship the aporntool package (+ subpackages), never tests/docs
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

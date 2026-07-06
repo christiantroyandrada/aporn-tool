@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 — 2026-07-07
+
+First release published to **PyPI** — `pip install aporn-tool`, then run `aporn-tool <mode> --in …`
+(the one-word `aporntool` and `python -m aporntool` also work).
 
 ### Added
 - **Target + coordinate auto-detection** — `--target` is now optional: when omitted, the object name
