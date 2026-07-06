@@ -637,21 +637,17 @@ def test_emission_stage_ids_include_mirrorx_and_no_spcc(tmp_path):
     assert [s.id for s in stages] == ["convert", "calibrate", "register", "stack", "mirrorx"]
 
 
-def test_running_stack_writes_script_and_saves_golden_anchor(tmp_path):
+def test_emission_mirrorx_stage_saves_golden_anchor(tmp_path):
     ws = Workspace(tmp_path, "M8"); ws.create()
     scripts = []
     stages = build_preprocess_stages("dso-emission-nebula", ws, Config.default(),
                                      resolve_target("M8"), siril_exe="siril-cli",
                                      runner=_fake_runner_factory(scripts))
-    stack = next(s for s in stages if s.id == "stack")
-    # Simulate: before the stack stage's produces() can pass, the stage must run and the
-    # golden anchor file must exist. The stage's run writes the .ssf; our fake runner then
-    # creates the anchor to mimic SIRIL, so produces() is True.
-    (ws.linear).mkdir(parents=True, exist_ok=True)
-    stack.run()
-    # The stack .ssf must save the golden anchor as <TARGET>_Linear and be logged.
-    assert any("save" in s and "M8_Linear" in s for s in scripts)
-    assert (ws.logs / "stack.ssf").exists()
+    mirrorx = next(s for s in stages if s.id == "mirrorx")
+    mirrorx.run()
+    # emission's mirrorx is the LAST preprocess stage → its .ssf mirrors AND saves <TARGET>_Linear.
+    assert any("mirrorx_single result" in s and "M8_Linear" in s for s in scripts)
+    assert (ws.logs / "mirrorx.ssf").exists()
 
 
 def test_spcc_stage_uses_local_gaia_paths_when_configured(tmp_path):
@@ -726,43 +722,42 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
         lambda: _run("register", register_cmds(mode), cd=str(proc)),
         lambda: (proc / "r_pp_light_.seq").exists()))
 
-    # stack: sigma-clip → result.fit. For single-panel modes with NO spcc in preprocess, this
-    # stage also mirrors and saves the golden anchor so the anchor exists at stack's end.
-    def _stack_run():
-        cmds = stack_cmds(mode)
-        if is_single_panel(mode):
-            cmds += mirrorx_cmds()
-        if not spcc_in_preprocess(mode):
-            # emission/star-cluster: the post-stack (+mirrorx) linear IS the golden anchor.
-            cmds += ["load result", f"save {anchor.with_suffix('').as_posix()}", "close"]
-        _run("stack", cmds, cd=str(proc))
-    # A single-panel non-SPCC mode's anchor exists after stack; a mosaic/reflection's after spcc.
+    anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
+
+    # stack: sigma-clip the registered sequence → result.fit (linear). No mirror/anchor here.
     stages.append(Stage(
-        "stack", _stack_run,
-        lambda: (proc / "result.fit").exists() or _nonzero(anchor)))
+        "stack",
+        lambda: _run("stack", stack_cmds(mode), cd=str(proc)),
+        lambda: (proc / "result.fit").exists()))
 
     if is_single_panel(mode):
-        # A dedicated mirrorx stage id for resume addressability (the work happened in stack's
-        # script, but the id lets --from/--redo target orientation explicitly).
+        # mirrorx: undo the Seestar vertical flip. For emission/star-cluster (no SPCC in
+        # preprocess) mirrorx is the LAST preprocess stage, so it also SAVES the golden anchor;
+        # for reflection it just mirrors result in place (SPCC saves the anchor next).
+        def _mirrorx_run():
+            if spcc_in_preprocess(mode):
+                _run("mirrorx", ["mirrorx_single result"], cd=str(proc))
+            else:
+                _run("mirrorx",
+                     ["mirrorx_single result", "load result", f"save {anchor_noext}", "close"],
+                     cd=str(proc))
         stages.append(Stage(
-            "mirrorx",
-            lambda: None,                 # already applied in the stack script above
-            lambda: True))
+            "mirrorx", _mirrorx_run,
+            (lambda: _nonzero(anchor)) if not spcc_in_preprocess(mode)
+            else (lambda: (proc / "result.fit").exists())))
 
     if spcc_in_preprocess(mode):
-        # mosaic/reflection: platesolve + SPCC on the stack, then SAVE the golden anchor.
+        # spcc: platesolve + SPCC on result (already mirrored for reflection), then SAVE the anchor.
         def _spcc_run():
             cmds = []
             if cfg.catalog_astro and cfg.catalog_photo:
                 cmds += gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo)
-            cmds += ["load result"]
-            if is_single_panel(mode):     # reflection mirrors before SPCC
-                cmds += mirrorx_cmds()
             cmds += [
+                "load result",
                 platesolve_cmd(coords=f"{target.ra},{target.dec}",
                                focal=cfg.seestar_focal_mm, pixel=cfg.seestar_pixel_um),
                 spcc_cmd(),
-                f"save {anchor.with_suffix('').as_posix()}",
+                f"save {anchor_noext}",
                 "close",
             ]
             _run("spcc", cmds, cd=str(proc))
@@ -771,7 +766,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
     return stages
 ```
 
-> Note for implementer: SIRIL's `save <name>` appends `.fit`, so we pass the anchor path **without** the `.fit` suffix (`anchor.with_suffix('')`). The `produces` check looks for the full `.fit`. In the mosaic/reflection case the anchor only exists after `spcc`; the `stack` stage's `produces` accepts `result.fit` OR the anchor so it passes for both branches.
+> Note for implementer: SIRIL's `save <name>` appends `.fit`, so we pass the anchor path **without** the `.fit` suffix (`anchor_noext`); the `produces` verifiers look for the full `.fit`. The golden anchor is saved by each mode's **last** preprocess stage: `mirrorx` for emission/star-cluster, `spcc` for mosaic/reflection.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -823,13 +818,10 @@ def _install_fake_siril(monkeypatch, tmp_home):
             "register": proc / "r_pp_light_.seq",
         }.get(name, proc / "result.fit").write_text("x", encoding="utf-8")
         (proc / "result.fit").write_text("x", encoding="utf-8")
-        # Emulate the anchor save that the stack/spcc script performs.
+        # Emulate the anchor save that the last preprocess stage performs.
         linear = Path(workdir) / "02_linear"
         linear.mkdir(parents=True, exist_ok=True)
-        for f in linear.parent.glob("02_linear"):
-            pass
-        # target folder name == workdir name
-        target = Path(workdir).name
+        target = Path(workdir).name           # workdir == _work/<target>
         (linear / f"{target}_Linear.fit").write_text("x", encoding="utf-8")
         class R: returncode = 0; stdout = ""; stderr = ""
         return R()
@@ -868,10 +860,10 @@ Expected: FAIL — `cmd_mode` still prints the "Plan 2" stub and never creates t
 
 In `aporntool/cli.py`: add imports near the top —
 ```python
-from aporntool.stages.preprocess import build_preprocess_stages, run_siril  # run_siril re-exported for tests
+from aporntool.stages.preprocess import build_preprocess_stages
 from aporntool.stages.engine import run_pipeline
 ```
-> Note: import `run_siril` into `preprocess`'s namespace already happens (Task 5); the test monkeypatches `aporntool.stages.preprocess.run_siril`, so `cli` must call `build_preprocess_stages` (which uses that name) — no extra wiring needed. The `from ... import run_siril` line in cli is optional; keep cli calling `build_preprocess_stages` only.
+> Note: `build_preprocess_stages` internally calls `run_siril` (imported into `preprocess`'s namespace in Task 5), so the Task-6 test monkeypatches `aporntool.stages.preprocess.run_siril` — `cli` only needs `build_preprocess_stages`, not `run_siril`.
 
 Add the three flags in `build_parser`'s per-mode loop (alongside `--preflight-only`):
 ```python
@@ -880,19 +872,15 @@ Add the three flags in `build_parser`'s per-mode loop (alongside `--preflight-on
         pm.add_argument("--force", action="store_true", help="re-run all stages, ignore checkpoints")
 ```
 
-Replace the tail of `cmd_mode` (the part after the manifest is created / the "Plan 2" print) with:
+Replace the OLD tail of `cmd_mode` — from the existing `m = Manifest(...)` creation through the
+`"Preflight OK. (Pipeline stages land in Plan 2.)"` print and its `return 0` — with:
 ```python
-    m = Manifest(mode=mode, target=ws.target, order=MODE_ORDER[mode],
-                 input_fingerprint=input_fingerprint(iter_fits(ws.lights)))
-    save_manifest(m, ws.manifest_path)
-
-    # Run the preprocess core to the golden anchor. SIRIL is resolved via config/discovery;
-    # each stage checkpoints into the manifest so a failure can be fixed and resumed (FR-24).
+    # Build this mode's preprocess stages, record their ids as the manifest order, and run the
+    # pipeline to the golden anchor. Each stage checkpoints so a failure can be fixed + resumed.
     siril = _resolve_tool(cfg, "siril")
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
-    # Only the preprocess stages exist yet (finish/graxpert/starnet arrive in later plans);
-    # track exactly those in the manifest order so resume reasons about real stages.
-    m.order = [s.id for s in stages]
+    m = Manifest(mode=mode, target=ws.target, order=[s.id for s in stages],
+                 input_fingerprint=input_fingerprint(iter_fits(ws.lights)))
     save_manifest(m, ws.manifest_path)
     ok = run_pipeline(m, stages, save=lambda mm: save_manifest(mm, ws.manifest_path),
                       from_stage=args.from_stage, redo=args.redo, force=args.force)
@@ -903,7 +891,9 @@ Replace the tail of `cmd_mode` (the part after the manifest is created / the "Pl
     print("(Finishing stages land in Plan 4.)")
     return 0
 ```
-Keep the existing preflight/`--preflight-only`/staging logic above this unchanged.
+Keep the existing preflight / `--preflight-only` / input-validation / staging logic above this
+unchanged. **Also delete the now-unused `MODE_ORDER` dict** from `cli.py` — the manifest order now
+comes from the stage list; `cmd_status` reads `order` from the saved manifest, so it is unaffected.
 
 - [ ] **Step 4: Run the full suite to verify everything passes**
 
