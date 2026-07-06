@@ -1,0 +1,16 @@
+[project]
+name = "aporntool"
+version = "0.1.0"
+description = "Astropornography tool — one command from raw subs to a finished astrophoto"
+requires-python = ">=3.10"
+dependencies = []                      # stdlib-only for the foundation; finishers add numpy/astropy later
+
+[project.scripts]
+aporntool = "aporntool.cli:main"       # installs an `aporntool` command
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
