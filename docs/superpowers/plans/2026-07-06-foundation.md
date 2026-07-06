@@ -154,6 +154,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .venv/
+.superpowers/
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1237,12 +1238,11 @@ import aporntool
 from aporntool.discovery import discover_tool
 from aporntool.config import Config, load_config, save_config
 from aporntool.catalog import resolve_target
-from aporntool.workspace import Workspace, stage_fits, count_fits
+from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
 from aporntool.locations import graxpert_model_root
-from aporntool.workspace import iter_fits
 
 DSO_MODES = ["dso-mosaic", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
 # The stage order the manifest tracks per mode (finish/details land in Plan 2).
@@ -1281,22 +1281,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _discover_all(cfg: Config) -> dict:
-    # Resolve every tool once; config path (if set) wins, else PATH/known locations.
-    return {t: (str(discover_tool(t, config_path=cfg.tool_paths.get(t))) or "")
-            or None for t in ALL_TOOLS}
+def _resolve_tool(cfg: Config, tool: str):
+    # Discover one tool as a plain str path (or None) — used by config-check and preflight.
+    found = discover_tool(tool, config_path=cfg.tool_paths.get(tool))
+    return str(found) if found else None
 
 
 def cmd_config(args) -> int:
     cfg = load_config(args.config)
-    found = {t: discover_tool(t, config_path=cfg.tool_paths.get(t)) for t in ALL_TOOLS}
     print("Tool discovery:")
     ok = True
-    for tool, path in found.items():
-        mark = "OK " if path else "MISSING"
-        print(f"  [{mark}] {tool}: {path or 'not found'}")
+    for tool in ALL_TOOLS:
+        path = _resolve_tool(cfg, tool)
+        print(f"  [{'OK ' if path else 'MISSING'}] {tool}: {path or 'not found'}")
         if path:
-            cfg.tool_paths.setdefault(tool, str(path))
+            cfg.tool_paths.setdefault(tool, path)
         else:
             ok = False
     save_config(cfg, args.config)          # write a starter config the user can edit
@@ -1319,8 +1318,8 @@ def cmd_status(args) -> int:
 
 
 def cmd_mode(args, mode: str) -> int:
-    # Resolve inputs (drag-and-drop friendly), stage subs, run preflight, checkpoint. Pipeline
-    # stages themselves arrive in Plan 2 — this proves the end-to-end skeleton + preflight gate.
+    # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + checkpoint.
+    # Pipeline stages themselves arrive in Plan 2 — this proves the skeleton + preflight gate.
     cfg = load_config(args.config)
     in_dirs = [to_input_dir(sanitize_dropped_path(p)) for p in args.inputs]
     for d in in_dirs:
@@ -1328,6 +1327,23 @@ def cmd_mode(args, mode: str) -> int:
             print(f"ERROR: input folder does not exist: {d}")
             return 1
     target = resolve_target(args.target, args.coords)
+
+    # Preflight is environment validation — run it before any staging/compute (FR-PF1).
+    tool_paths = {t: _resolve_tool(cfg, t) for t in MODE_TOOLS.get(mode, [])}
+    results = run_preflight(mode, tool_paths=tool_paths,
+                            graxpert_model_root=graxpert_model_root())
+    failed = [r for r in results if not r.ok]
+    print("Preflight:")
+    for r in results:
+        print(f"  [{'OK ' if r.ok else 'FAIL'}] {r.name}: {r.detail}")
+        if not r.ok:
+            print(f"       -> {r.remediation}")
+    if failed:
+        print("\nPreflight failed - fix the above, then re-run the same command to continue.")
+        return 2
+    if args.preflight_only:                       # FR-PF3: validate only, no processing
+        print("\nPreflight OK (--preflight-only).")
+        return 0
 
     ws = Workspace(Path(args.out), target.name.upper().replace(" ", ""))
     ws.create()
@@ -1337,24 +1353,10 @@ def cmd_mode(args, mode: str) -> int:
         print("ERROR: no .fit subs found in the given folder(s).")
         return 1
 
-    tool_paths = {t: (lambda p: str(p) if p else None)(
-        discover_tool(t, config_path=cfg.tool_paths.get(t))) for t in MODE_TOOLS.get(mode, [])}
-    results = run_preflight(mode, tool_paths=tool_paths,
-                            graxpert_model_root=graxpert_model_root())
-    failed = [r for r in results if not r.ok]
-    print("\nPreflight:")
-    for r in results:
-        print(f"  [{'OK ' if r.ok else 'FAIL'}] {r.name}: {r.detail}")
-        if not r.ok:
-            print(f"       → {r.remediation}")
-    if failed:
-        print("\nPreflight failed — fix the above, then re-run the same command to continue.")
-        return 2
-
     m = Manifest(mode=mode, target=ws.target, order=MODE_ORDER[mode],
                  input_fingerprint=input_fingerprint(iter_fits(ws.lights)))
     save_manifest(m, ws.manifest_path)
-    print("\nPreflight OK. (Pipeline stages land in Plan 2.)")
+    print("Preflight OK. (Pipeline stages land in Plan 2.)")
     return 0
 
 
