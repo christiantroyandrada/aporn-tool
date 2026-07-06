@@ -68,27 +68,88 @@ def save_deliverables(rgb01, out_stem):
     return Path(str(out) + ".tif")
 
 
+def scnr_green(rgb):
+    # Remove residual green (reflection nebulae have none) via the average-neutral SCNR rule.
+    out = np.array(rgb, np.float64, copy=True)
+    g = out[..., 1]
+    out[..., 1] = g - np.clip(g - np.maximum(out[..., 0], out[..., 2]), 0, None) * 0.95
+    return np.clip(out, 0, 1)
+
+
+def saturate(rgb, sat_r, sat_g, sat_b):
+    # Per-channel saturation about luminance: suppress red, boost blue for scattered starlight.
+    L = np.asarray(rgb, np.float64).mean(2, keepdims=True)
+    return np.clip(L + (np.asarray(rgb, np.float64) - L) * np.array([sat_r, sat_g, sat_b]), 0, 1)
+
+
+def midtone_boost(rgb, boost):
+    # Two-pass MTF lift of the nebula midtones (gentle fixed 2nd pass).
+    rgb = np.clip(np.asarray(rgb, np.float64), 0, 1)
+    med = float(np.median(rgb.mean(2)))
+    t1 = med + (0.5 - med) * boost
+    rgb = np.clip(np.stack([mtf(find_m(med, t1), rgb[..., i]) for i in range(3)], -1), 0, 1)
+    med2 = float(np.median(rgb.mean(2)))
+    t2 = med2 + (0.55 - med2) * 0.3
+    return np.clip(np.stack([mtf(find_m(med2, t2), rgb[..., i]) for i in range(3)], -1), 0, 1)
+
+
+def local_contrast(rgb, amount):
+    # Large-radius unsharp on luminance to bring out dust structure.
+    rgb = np.asarray(rgb, np.float64)
+    L = rgb.mean(2, keepdims=True)
+    hp = L - gaussian_filter(L, (16, 16, 0))
+    Lc = np.clip(L + hp * amount * np.clip(L, 0, 1), 0, 1)
+    return np.clip(rgb * np.divide(Lc, np.clip(L, 1e-5, None)), 0, 1)
+
+
+def darken_background(rgb, bgpull, gamma):
+    # Pull background median down to `bgpull`, then gamma-compress shadows → deep black sky.
+    rgb = np.clip(np.asarray(rgb, np.float64), 0, 1)
+    med = float(np.median(rgb.mean(2)))
+    return np.clip(np.clip(mtf(find_m(med, bgpull), rgb), 0, 1) ** gamma, 0, 1)
+
+
+def process_stars(stars, brightness, saturation):
+    # Star layer: boost colour + nonlinear brightness curve + a tight two-scale bloom.
+    st = np.clip(np.asarray(stars, np.float64), 0, 1)
+    L = st.mean(2, keepdims=True)
+    st = np.clip(L + (st - L) * saturation, 0, 1)
+    st = np.clip(st + (st ** 2) * (brightness - 1.0), 0, 1)
+    bright = np.clip(st - 0.40, 0, None)
+    bloom = gaussian_filter(bright, (1.5, 1.5, 0)) * 0.8 + gaussian_filter(bright, (4, 4, 0)) * 0.2
+    return np.clip(st + bloom, 0, 1)
+
+
+REFLECTION_DEFAULTS = dict(target_bg=0.35, sat_r=0.30, sat_g=1.3, sat_b=4.5,
+                           midboost=0.55, lc=1.3, bgpull=0.08, gamma=0.85,
+                           st_bright=1.5, st_sat=1.2)
+
+
 def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run,
-                          target_bg=0.35, scratch_dir=None):
-    # Load the GraXpert _clean linear, autostretch, remove stars with StarNet2, fix the grid artifact,
-    # rebuild the star layer, screen-blend it back over the starless layer, and write deliverables.
+                          scratch_dir=None, params=None):
+    # Dual-layer reflection finish: stretch -> StarNet -> process starless (kill green, boost blue,
+    # lift midtones, local contrast, DARKEN background) + process stars -> screen-blend -> save.
     import tifffile
     from astropy.io import fits
-
+    p = {**REFLECTION_DEFAULTS, **(params or {})}
     d = fits.getdata(str(clean_fits)).astype(np.float64)
-    img = np.moveaxis(d, 0, -1) if d.ndim == 3 else np.stack([d] * 3, -1)   # [C,H,W]->HWC
+    img = np.moveaxis(d, 0, -1) if d.ndim == 3 else np.stack([d] * 3, -1)
     img = np.clip(img, 0, None)
     mx = np.percentile(img, 99.995) or 1.0
-    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=target_bg)
-    # StarNet2 scratch tifs must NOT leak into the --out root (FR-4); default to the caller's
-    # scratch dir, falling back to out_stem's parent so the pre-existing unit test still works.
-    work = Path(scratch_dir) if scratch_dir is not None else Path(out_stem).parent
+    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=p["target_bg"])
+    work = Path(scratch_dir) if scratch_dir else Path(out_stem).parent
     work.mkdir(parents=True, exist_ok=True)
     tin, tout = work / "_sn_in.tif", work / "_sn_out.tif"
     tifffile.imwrite(str(tin), (stretched * 65535 + 0.5).astype(np.uint16), photometric="rgb")
     runner([str(starnet_exe), "-i", str(tin), "-o", str(tout)], capture_output=True, text=True)
     starless = fix_starnet_grid(tifffile.imread(str(tout)).astype(np.float64) / 65535.0)
-    stars = np.clip(stretched - starless, 0, 1)          # what StarNet removed = the star layer
-    combined = screen_blend(starless, stars)             # stars back on top, no blown highlights (#10)
+    stars = np.clip(stretched - starless, 0, 1)
+    sl = scnr_green(starless)
+    sl = saturate(sl, p["sat_r"], p["sat_g"], p["sat_b"])
+    sl = midtone_boost(sl, p["midboost"])
+    sl = local_contrast(sl, p["lc"])
+    sl = darken_background(sl, p["bgpull"], p["gamma"])
+    st = process_stars(stars, p["st_bright"], p["st_sat"])
+    combined = screen_blend(sl, st)
     save_deliverables(combined, out_stem)
     return Path(str(out_stem) + ".tif")
