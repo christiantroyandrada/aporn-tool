@@ -20,20 +20,40 @@ def denoise_cmd(exe, in_path, out_path, *, gpu=True, strength=0.8) -> list:
 
 
 def fix_double_ext(out_path) -> Path:
-    # GraXpert appends .fits to -output, so `out` becomes `out.fits.fits`. Normalise to `out.fits`.
+    # GraXpert APPENDS ".fits" to -output (it does NOT replace an existing suffix): extension-less
+    # "X" -> "X.fits"; "X.fits" -> "X.fits.fits". Return the real single-.fits file, renaming the
+    # double down if present. Robust to whatever suffix out_path carries.
     out_path = Path(out_path)
-    single = out_path.with_suffix(".fits") if out_path.suffix != ".fits" else out_path
-    double = Path(str(single) + ".fits")
+    base = out_path if out_path.suffix == ".fits" else Path(str(out_path) + ".fits")
+    double = Path(str(base) + ".fits")
     if double.exists():
-        if single.exists():
-            single.unlink()
-        double.rename(single)
-    return single
+        if base.exists():
+            base.unlink()          # clear a stale single so rename can't fail on Windows
+        double.rename(base)
+    return base
 
 
-def run_graxpert(argv, out_path, *, runner=subprocess.run, settle=0.0) -> Path:
-    # Run GraXpert, wait for the write to settle (CLI can return early), then fix the extension.
+def run_graxpert(argv, out_path, *, runner=subprocess.run, poll=0.5, settle=0.0,
+                 timeout=600.0, sleep=time.sleep) -> Path:
+    # Run GraXpert, then (when settle>0) wait for the output file's size to stop changing for
+    # `settle` seconds before handing it to SIRIL — the CLI can return before the write finishes.
     runner(argv, capture_output=True, text=True)
-    if settle:
-        time.sleep(settle)   # give the file system a moment; real callers pass a few seconds
+    if settle > 0:
+        base = out_path if str(out_path).endswith(".fits") else Path(str(out_path) + ".fits")
+        double = Path(str(base) + ".fits")
+        waited = 0.0
+        last = -1
+        stable = 0.0
+        while waited < timeout:
+            target = double if double.exists() else Path(base)
+            size = target.stat().st_size if target.exists() else -1
+            if size >= 0 and size == last:
+                stable += poll
+                if stable >= settle:
+                    break
+            else:
+                stable = 0.0
+                last = size
+            sleep(poll)
+            waited += poll
     return fix_double_ext(out_path)

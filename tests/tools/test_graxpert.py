@@ -38,3 +38,22 @@ def test_run_graxpert_runs_then_fixes_extension(tmp_path):
         return R()
     final = run_graxpert(["GraXpert.exe", "-cli"], tmp_path / "out", runner=fake_runner)
     assert final == tmp_path / "out.fits" and final.exists()
+
+
+def test_fix_double_ext_append_semantics_for_nonfits_suffix(tmp_path):
+    # out_path carries a .fit suffix → GraXpert wrote X.fit.fits (append). Must return the REAL file.
+    real = tmp_path / "X.fit.fits"; real.write_text("d", encoding="utf-8")
+    got = fix_double_ext(tmp_path / "X.fit")
+    assert got.exists() and got == real          # not a phantom X.fits
+
+
+def test_run_graxpert_size_poll_waits_then_returns(tmp_path):
+    (tmp_path / "out.fits.fits").write_text("data", encoding="utf-8")   # already-stable double
+    slept = []
+    def fake_runner(cmd, **kw):
+        class R: returncode = 0; stdout = ""; stderr = ""
+        return R()
+    final = run_graxpert(["G", "-cli"], tmp_path / "out", runner=fake_runner,
+                         settle=1.0, poll=0.5, sleep=lambda s: slept.append(s))
+    assert final == tmp_path / "out.fits" and final.exists()
+    assert slept                                  # the poll actually ran
