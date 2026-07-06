@@ -2,7 +2,9 @@
 
 **One command from raw sub-exposures to a finished, share-ready astrophoto.**
 
-📦 **Latest release:** [v0.2.0](https://github.com/christiantroyandrada/aporn-tool/releases/latest) — version history in the [changelog](CHANGELOG.md).
+[![PyPI](https://img.shields.io/pypi/v/aporn-tool)](https://pypi.org/project/aporn-tool/) [![Python](https://img.shields.io/pypi/pyversions/aporn-tool)](https://pypi.org/project/aporn-tool/)
+
+📦 **Install:** `pip install aporn-tool` — [releases](https://github.com/christiantroyandrada/aporn-tool/releases) · [changelog](CHANGELOG.md).
 
 aPornTool takes a folder of raw astrophotography subs and drives them through the full
 linear→nonlinear editing pipeline — stacking, photometric colour calibration, gradient and noise
