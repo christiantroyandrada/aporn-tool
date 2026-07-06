@@ -27,7 +27,6 @@ with any OSC `.fit` subs, and runs natively on **Windows, macOS (incl. Apple Sil
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [First-time setup](#first-time-setup)
-- [Quick start](#quick-start)
 - [Usage — from simplest to advanced](#usage--from-simplest-to-advanced)
 - [Command reference](#command-reference)
 - [Stages & resume](#stages--resume)
