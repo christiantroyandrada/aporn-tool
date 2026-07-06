@@ -67,3 +67,16 @@ def test_force_reruns_everything():
     _, save = _saver()
     run_pipeline(m, stages, save=save, force=True)
     assert ran == ["a", "b"]
+
+
+def test_unknown_from_stage_fails_loud_without_running():
+    ran = []
+    m = _mk(["a", "b"])
+    stages = [Stage("a", lambda: ran.append("a"), lambda: True),
+              Stage("b", lambda: ran.append("b"), lambda: True)]
+    _, save = _saver()
+    msgs = []
+    ok = run_pipeline(m, stages, save=save, from_stage="nosuch", log=msgs.append)
+    assert ok is False
+    assert ran == []                                  # nothing ran
+    assert any("unknown stage 'nosuch'" in msg for msg in msgs)

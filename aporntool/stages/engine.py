@@ -15,8 +15,13 @@ class Stage:
 def run_pipeline(manifest, stages, *, save, from_stage=None, redo=None, force=False, log=print) -> bool:
     # Decide where to (re)start. --force reruns all; --redo/--from reset from a named stage
     # downstream (invalidation, FR-24e); otherwise resume at the first not-done stage.
-    if redo or from_stage:
-        manifest.invalidate_from(redo or from_stage)
+    target = redo or from_stage
+    if target is not None:
+        if target not in manifest.order:
+            # Fail loud on a typo'd/absent stage id instead of an opaque ValueError (NFR-3).
+            log(f"unknown stage '{target}'; valid stages for this run: {', '.join(manifest.order)}")
+            return False
+        manifest.invalidate_from(target)
     by_id = {s.id: s for s in stages}
     for sid in manifest.order:
         rec = manifest.stage(sid)
