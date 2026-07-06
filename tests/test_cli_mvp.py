@@ -171,6 +171,43 @@ def test_without_clean_flag_all_work_is_retained(tmp_path, monkeypatch):
     assert (work / "02_linear" / "M31_Linear.fit").exists()
 
 
+def _write_real_sub(path, obj="M 31", ra=11.25, dec=41.4):
+    # A valid FITS sub carrying OBJECT + RA/DEC, so header auto-detection has something to read.
+    arr = np.full((3, 10, 10), 0.5, np.float32)
+    hdu = fits.PrimaryHDU(arr)
+    hdu.header["OBJECT"] = obj
+    hdu.header["RA"] = ra
+    hdu.header["DEC"] = dec
+    hdu.writeto(str(path))
+
+
+def test_target_autodetected_from_header_when_omitted(tmp_path, monkeypatch):
+    # No --target: the tool reads OBJECT ("M 31") from the sub header and names everything M31.
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "subs"; subs.mkdir()
+    _write_real_sub(subs / "Light_0001.fit", "M 31", 11.25, 41.4)
+    out = tmp_path / "out"
+    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out)])
+    assert code == 0
+    assert (out / "M31_final.tif").exists()
+
+
+def test_out_defaults_beside_input_when_omitted(tmp_path, monkeypatch):
+    # No --out and no --target: results land in a <TARGET> folder beside the subs.
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "data" / "subs"; subs.mkdir(parents=True)
+    _write_real_sub(subs / "Light_0001.fit", "M 31", 11.25, 41.4)
+    code = main(["dso-mosaic", "--in", str(subs)])
+    assert code == 0
+    assert (subs.parent / "M31" / "M31_final.tif").exists()
+
+
+def test_coords_flag_is_removed(tmp_path):
+    from aporntool.cli import build_parser
+    with __import__("pytest").raises(SystemExit):
+        build_parser().parse_args(["dso-mosaic", "--in", "x", "--coords", "1,2"])
+
+
 def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
     # If the pipeline fails, --clean must NOT delete working files (resume must still work).
     _install_fakes(monkeypatch, tmp_path)

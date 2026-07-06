@@ -7,7 +7,7 @@ from pathlib import Path
 import aporntool
 from aporntool.discovery import discover_tool
 from aporntool.config import Config, load_config, save_config
-from aporntool.catalog import resolve_target
+from aporntool.detect import resolve_target_auto
 from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
@@ -39,9 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
         pm = sub.add_parser(mode, help=f"process a {mode} target")
         pm.add_argument("--in", dest="inputs", action="append", required=True,
                         help="subs folder (repeatable for multi-night)")
-        pm.add_argument("--out", required=True)
-        pm.add_argument("--target", required=True)
-        pm.add_argument("--coords", default=None, help="RA,DEC if target is unknown")
+        pm.add_argument("--out", default=None,
+                        help="output root (default: a <TARGET> folder beside the input subs)")
+        pm.add_argument("--target", default=None,
+                        help="object name (default: auto-detected from the subs' FITS OBJECT header)")
         pm.add_argument("--config", default="aporntool.config.json")
         pm.add_argument("--preflight-only", action="store_true")
         pm.add_argument("--from", dest="from_stage", default=None, help="restart at this stage id")
@@ -141,12 +142,16 @@ def cmd_mode(args, mode: str) -> int:
             print(f"ERROR: input folder does not exist: {d}")
             return 1
     try:
-        target = resolve_target(args.target, args.coords)
+        # --target/--coords are optional: fall back to the subs' FITS OBJECT + RA/DEC header.
+        target = resolve_target_auto(args.target, in_dirs[0])
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}")
         return 1
 
-    ws = Workspace(Path(args.out), target.name.upper().replace(" ", ""))
+    target_key = target.name.upper().replace(" ", "")
+    # --out is optional: default to a folder named after the target, right beside the input subs.
+    out_root = Path(args.out) if args.out else in_dirs[0].parent / target_key
+    ws = Workspace(out_root, target_key)
     if " " in str(ws.out_root):
         print("ERROR: --out path must not contain spaces (SIRIL path limitation). "
               "Choose a space-free output folder. (Full spaced-path support is planned.)")

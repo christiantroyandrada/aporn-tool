@@ -137,24 +137,30 @@ aporntool dso-mosaic --in "/path/to/subs" --out /path/to/out --target M31 --pref
 
 ### 1. The simplest run
 
-One folder of subs, a catalogued target:
+Point it at a folder of subs and pick the mode — that's all. The object name and coordinates are
+read from the subs' FITS header, and the results land in a folder named after the target, right
+beside your subs:
 
 ```bash
-aporntool dso-mosaic --in "/path/to/M31 subs" --out /path/to/out --target M31
+aporntool dso-mosaic --in "/path/to/M31 subs"
 ```
 
-Produces at `/path/to/out`: `M31_final.tif` (16-bit — the real deliverable), `.png`, `.jpg`
-(quick-look), `.fits`. Everything else lives in `/path/to/out/_work/`.
+Produces `M31_final.tif` (16-bit — the real deliverable), `.png`, `.jpg` (quick-look), and `.fits`
+next to the input; everything else lives under `_work/`.
 
-> ⚠️ **`--out` must not contain spaces** (a SIRIL path limitation). The `--in` path and the sub
-> filenames may contain spaces.
+Override either default when you want to: `--target` for a custom name, `--out` for a custom
+location.
+
+> ⚠️ **The output path must not contain spaces** (a SIRIL limitation). The default output inherits
+> the subs' parent folder; if that path has spaces, pass a space-free `--out`. The `--in` path and
+> sub filenames may contain spaces.
 
 ### 2. Other modes
 
 ```bash
-aporntool dso-emission-nebula   --in "/data/M8"    --out /data/out --target M8
-aporntool dso-reflection-nebula --in "/data/M78"    --out /data/out --target M78 --coords 86.7,0.05
-aporntool dso-star-cluster      --in "/data/M13"   --out /data/out --target M13
+aporntool dso-emission-nebula   --in "/data/M8"
+aporntool dso-reflection-nebula --in "/data/M78"
+aporntool dso-star-cluster      --in "/data/M13"
 ```
 
 ### 3. Combine multiple nights (more integration = the #1 quality lever)
@@ -168,13 +174,14 @@ aporntool dso-mosaic \
   --out /data/out --target M31
 ```
 
-### 4. A target not in the catalog
+### 4. A target not in the built-in catalog
 
-Supply coordinates (`RA,DEC` in degrees):
+Nothing special needed — the coordinates come from your subs' FITS header, so unlisted targets
+(VdB 106, Sh2-155, …) just work. Pass `--target` only when you want a custom output name:
 
 ```bash
-aporntool dso-emission-nebula --in "/data/sh2-155" --out /data/out \
-  --target Sh2-155 --coords 343.5,62.6
+aporntool dso-reflection-nebula --in "/data/vdb106"
+aporntool dso-emission-nebula   --in "/data/sh2-155" --target Sh2-155
 ```
 
 ### 5. Control the crop
@@ -260,20 +267,21 @@ aporntool <command> [options]
 | Option | Description |
 |--------|-------------|
 | `--in PATH` | subs folder — **required**, repeatable for multi-night |
-| `--out PATH` | output root — **required**, must be space-free |
-| `--target NAME` | catalogued target, or any name with `--coords` |
-| `--coords RA,DEC` | RA,DEC in degrees for a non-catalogued target |
+| `--out PATH` | output root — optional; defaults to a `<TARGET>` folder beside the subs; must be space-free |
+| `--target NAME` | object name — optional; auto-detected from the subs' FITS `OBJECT` header |
 | `--crop "X Y W H"` | explicit SIRIL crop box (default: auto-crop) |
 | `--no-crop` | disable auto-crop; keep the full frame |
 | `--star-reduce F` | mosaic star blend-back fraction (default 0.5) |
+| `--clean` | on success, delete working files except the golden anchor (reclaims disk) |
 | `--from STAGE` | restart at this stage |
 | `--redo STAGE` | re-run this stage + everything downstream |
 | `--force` | re-run all stages, ignore checkpoints |
 | `--preflight-only` | validate the environment, then stop |
 | `--config PATH` | config file (default `aporntool.config.json`) |
 
-Catalogued targets: `M3 M4 M5 M6 M7 M8 M11 M13 M15 M16 M20 M22 M31 M33 M42 M44 M45 M51 M81 M92
-M101 NGC869 NGC6960 NGC7000`. Anything else needs `--coords`.
+Catalogued targets get canonical coordinates: `M3 M4 M5 M6 M7 M8 M11 M13 M15 M16 M20 M22 M31 M33 M42
+M44 M45 M51 M81 M92 M101 NGC869 NGC6960 NGC7000`. Anything else uses the RA/DEC from your subs'
+FITS header automatically.
 
 ---
 

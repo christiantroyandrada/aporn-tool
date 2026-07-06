@@ -3,12 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Target + coordinate auto-detection** — `--target` is now optional: when omitted, the object name
+  and coordinates are read from the subs' FITS header (`OBJECT` + `RA`/`DEC`), so unlisted targets
+  (e.g. VdB 106) work with no manual coords. `--out` is now optional too, defaulting to a `<TARGET>`
+  folder beside the input subs. The everyday command is just **mode + `--in`** (e.g.
+  `aporntool dso-mosaic --in "/path/to/M31 subs"`). `--target`/`--out` still override.
 - **`--clean` flag** (all `dso-*` modes): on a fully successful run, deletes the working files in
   `_work/<target>/` except the golden anchor (`02_linear/<TARGET>_Linear.fit`), the manifest, and
   logs. Reclaims almost all scratch disk (a real M8 run went 18 GB → 25 MB) while keeping a cheap
   re-finish — `--from bge` (mosaic/reflection) or `--from finish` (emission/cluster) rebuilds every
   deliverable from the anchor with no re-stack. Off by default; a failed run never cleans, so resume
   always works.
+
+### Removed
+- **`--coords` flag** — no longer needed now that coordinates are read from the FITS header. The
+  `resolve_target(name, coords=…)` library function still accepts explicit coords.
 
 ## v0.2.0 — 2026-07-07
 
