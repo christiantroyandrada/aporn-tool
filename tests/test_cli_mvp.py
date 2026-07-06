@@ -127,3 +127,66 @@ def test_crop_and_no_crop_are_mutually_exclusive(tmp_path, capsys):
                  "--target", "M31", "--crop", "0 0 10 10", "--no-crop"])
     assert code == 1
     assert "mutually exclusive" in capsys.readouterr().out
+
+
+def test_clean_flag_parses_and_defaults_false():
+    from aporntool.cli import build_parser
+    p = build_parser()
+    a = p.parse_args(["dso-mosaic", "--in", "x", "--out", "y", "--target", "M31", "--clean"])
+    assert a.clean is True
+    b = p.parse_args(["dso-mosaic", "--in", "x", "--out", "y", "--target", "M31"])
+    assert b.clean is False
+
+
+def test_clean_flag_removes_work_keeps_anchor(tmp_path, monkeypatch):
+    # On success, --clean deletes the bulky working files but keeps the golden anchor + manifest.
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    out = tmp_path / "out"
+    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+                 "--target", "M31", "--clean"])
+    assert code == 0
+    work = out / "_work" / "M31"
+    assert (out / "M31_final.tif").exists()                       # deliverables kept at root
+    assert (work / "02_linear" / "M31_Linear.fit").exists()       # golden anchor kept
+    assert (work / "aporntool.json").exists()                     # manifest kept (resume survives)
+    assert not (work / "01_process").exists()                     # bulky dirs gone
+    assert not (work / "03_graxpert").exists()
+    assert not (work / "05_finish").exists()
+    assert not (work / "00_lights").exists()
+    assert not (work / "02_linear" / "M31_cropped.fit").exists()  # disposable cropped anchor gone
+
+
+def test_without_clean_flag_all_work_is_retained(tmp_path, monkeypatch):
+    # Default (no --clean): every working file is retained.
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    out = tmp_path / "out"
+    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out), "--target", "M31"])
+    assert code == 0
+    work = out / "_work" / "M31"
+    assert (work / "01_process").exists()                         # retained by default
+    assert (work / "02_linear" / "M31_Linear.fit").exists()
+
+
+def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
+    # If the pipeline fails, --clean must NOT delete working files (resume must still work).
+    _install_fakes(monkeypatch, tmp_path)
+    import aporntool.stages.finish as fin
+
+    def boom(*a, **k):
+        raise RuntimeError("StarNet exploded")
+    monkeypatch.setattr(fin, "run_graxpert", boom)   # make the mosaic bge stage fail
+
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    out = tmp_path / "out"
+    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+                 "--target", "M31", "--clean"])
+    assert code == 1
+    work = out / "_work" / "M31"
+    # anchor from the successful preprocess must still be there for resume
+    assert (work / "02_linear" / "M31_Linear.fit").exists()
+    assert (work / "00_lights").exists()             # NOT cleaned — run did not succeed

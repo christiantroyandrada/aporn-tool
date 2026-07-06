@@ -54,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--star-reduce", type=float, default=0.5,
                         help="mosaic star-blend fraction after StarNet removal (default 0.5)")
         pm.add_argument("--profile", default=None, help="color/stretch preset override")
+        pm.add_argument("--clean", action="store_true",
+                        help="on success, delete working files except the golden anchor "
+                             "(reclaims disk; re-finish still works via --from bge/--from finish)")
     return parser
 
 
@@ -205,9 +208,26 @@ def cmd_mode(args, mode: str) -> int:
     tif = ws.out_root / f"{ws.target}_final.tif"
     if tif.exists():
         print(f"Done. Deliverables at {ws.out_root}: {ws.target}_final.(fits|tif|png|jpg)")
+        # --clean only fires here, i.e. after a fully successful run that produced all deliverables
+        # (a failed run returns above, so working files survive for resume).
+        if args.clean:
+            freed = ws.clean()
+            print(f"  Cleaned working files (~{_human(freed)} reclaimed); kept the golden anchor "
+                  f"{anchor.name}. Re-finish later with --from bge (mosaic/reflection) or "
+                  f"--from finish (emission/cluster) -- no re-stack needed.")
     else:
         print(f"Preprocess complete. Golden anchor: {anchor}  (finish stages: see mode)")
     return 0
+
+
+def _human(n: int) -> str:
+    # Human-readable byte size for the --clean summary.
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
 
 
 def main(argv=None) -> int:

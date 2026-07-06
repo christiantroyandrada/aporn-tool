@@ -62,3 +62,55 @@ def test_stage_fits_is_idempotent_on_rerun(tmp_path):
     dest = tmp_path / "_work" / "M31" / "00_lights"
     assert stage_fits([src], dest) == 1
     assert stage_fits([src], dest) == 0
+
+
+def _populate_work(ws):
+    # A realistic post-run _work tree: golden anchor + disposable cropped + bulky stage dirs.
+    ws.create()
+    (ws.linear / "M31_Linear.fit").write_bytes(b"anchor")          # golden anchor -> KEEP
+    (ws.linear / "M31_cropped.fit").write_bytes(b"cropped")        # disposable  -> DELETE
+    (ws.lights / "Light_0001.fit").write_bytes(b"x")
+    (ws.process / "r_pp_light_00001.fit").write_bytes(b"y" * 5000)
+    (ws.graxpert / "M31_clean.fits").write_bytes(b"z" * 3000)
+    (ws.finish / "M31_final.fit").write_bytes(b"w" * 1000)
+    (ws.previews / "p.jpg").write_bytes(b"x")
+    ws.manifest_path.write_text("{}")
+    (ws.logs / "stack.log").write_text("log")
+
+
+def test_clean_keeps_anchor_manifest_logs(tmp_path):
+    ws = Workspace(tmp_path, "M31")
+    _populate_work(ws)
+    ws.clean()
+    assert (ws.linear / "M31_Linear.fit").exists()   # golden anchor survives
+    assert ws.manifest_path.exists()                 # resume state survives
+    assert (ws.logs / "stack.log").exists()          # audit trail survives
+
+
+def test_clean_deletes_bulky_dirs_and_cropped(tmp_path):
+    ws = Workspace(tmp_path, "M31")
+    _populate_work(ws)
+    ws.clean()
+    assert not ws.lights.exists()
+    assert not ws.process.exists()
+    assert not ws.graxpert.exists()
+    assert not ws.finish.exists()
+    assert not ws.previews.exists()
+    assert not (ws.linear / "M31_cropped.fit").exists()   # cropped anchor is disposable
+
+
+def test_clean_reports_bytes_freed(tmp_path):
+    ws = Workspace(tmp_path, "M31")
+    _populate_work(ws)
+    freed = ws.clean()
+    # 5000 (process) + 3000 (graxpert) + 1000 (finish) + tiny cropped/previews; anchor NOT counted.
+    assert freed >= 9000
+    assert freed < 9000 + 500      # the 6-byte anchor must not be counted
+
+
+def test_clean_is_idempotent(tmp_path):
+    ws = Workspace(tmp_path, "M31")
+    _populate_work(ws)
+    ws.clean()
+    ws.clean()   # second call must not raise even though dirs are gone
+    assert (ws.linear / "M31_Linear.fit").exists()

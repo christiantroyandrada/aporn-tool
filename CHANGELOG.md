@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`--clean` flag** (all `dso-*` modes): on a fully successful run, deletes the working files in
+  `_work/<target>/` except the golden anchor (`02_linear/<TARGET>_Linear.fit`), the manifest, and
+  logs. Reclaims almost all scratch disk (a real M8 run went 18 GB → 25 MB) while keeping a cheap
+  re-finish — `--from bge` (mosaic/reflection) or `--from finish` (emission/cluster) rebuilds every
+  deliverable from the anchor with no re-stack. Off by default; a failed run never cleans, so resume
+  always works.
+
 ## v0.2.0 — 2026-07-07
 
 First cross-platform, end-to-end-verified release. One command turns raw OSC sub-exposures into a

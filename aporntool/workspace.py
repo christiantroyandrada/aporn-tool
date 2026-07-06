@@ -57,6 +57,45 @@ class Workspace:
         # Final images sit at the OUT root, e.g. M31_final.tif.
         return self.out_root / f"{self.target}_final.{ext}"
 
+    def clean(self) -> int:
+        # Post-success cleanup (opt-in --clean): delete every working file EXCEPT the golden anchor
+        # (02_linear/<TARGET>_Linear.fit), the manifest, and logs/. Reclaims almost all the disk a
+        # run leaves behind while keeping a cheap re-finish -- the bge/finish stages read the anchor,
+        # so `--from bge` / `--from finish` still work without re-stacking. Returns bytes actually
+        # freed (hardlinked staged subs share their data with your originals, so deleting them frees
+        # nothing and they are not counted). Safe to call repeatedly -- missing dirs are ignored.
+        anchor = self.linear / f"{self.target}_Linear.fit"
+        freed = 0
+        for d in (self.lights, self.process, self.graxpert, self.finish, self.previews):
+            freed += _freed_bytes(d)
+            shutil.rmtree(d, ignore_errors=True)
+        if self.linear.exists():
+            for entry in self.linear.iterdir():
+                if entry == anchor:
+                    continue                       # the one file we must keep
+                freed += _freed_bytes(entry)
+                if entry.is_dir():
+                    shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    entry.unlink()
+        return freed
+
+
+def _freed_bytes(path) -> int:
+    # Sum the sizes of regular files whose data is actually released by deleting them. A hardlinked
+    # file (st_nlink > 1 -- e.g. a staged sub still linked from your originals) frees no disk, so it
+    # is not counted, keeping the reported "reclaimed" number honest.
+    path = Path(path)
+    if not path.exists():
+        return 0
+    files = [path] if path.is_file() else [f for f in path.rglob("*") if f.is_file()]
+    total = 0
+    for f in files:
+        st = f.stat()
+        if st.st_nlink == 1:
+            total += st.st_size
+    return total
+
 
 def iter_fits(folder) -> list:
     # Only real FITS subs — Seestar folders also hold .jpg + _thn.jpg that SIRIL would wrongly ingest.
