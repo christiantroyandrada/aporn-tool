@@ -1,5 +1,7 @@
 """Command-line entry point: parse args and dispatch to config / status / a processing mode."""
 import argparse
+import os
+import platform
 from pathlib import Path
 
 import aporntool
@@ -10,7 +12,7 @@ from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
-from aporntool.locations import graxpert_model_root
+from aporntool.locations import graxpert_model_root, siril_config_dir
 from aporntool.stages.preprocess import build_preprocess_stages
 from aporntool.stages.finish import build_finish_stages
 from aporntool.stages.engine import run_pipeline
@@ -52,9 +54,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _tool_candidates(tool: str) -> list[str]:
+    """Return known install locations for a tool, per OS."""
+    system = platform.system()
+    candidates: list[str] = []
+    if tool == "siril":
+        if system == "Windows":
+            pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+            candidates.append(os.path.join(pf, "Siril", "bin", "siril-cli.exe"))
+        elif system == "Darwin":
+            candidates.extend([
+                "/Applications/Siril.app/Contents/MacOS/siril-cli",
+                "/opt/homebrew/bin/siril-cli",
+                "/usr/local/bin/siril-cli",
+            ])
+        else:
+            candidates.extend(["/usr/bin/siril-cli", "/usr/local/bin/siril-cli"])
+    elif tool == "graxpert":
+        if system == "Windows":
+            lad = os.environ.get("LOCALAPPDATA", "")
+            if lad:
+                candidates.append(os.path.join(lad, "Programs", "GraXpert", "GraXpert.exe"))
+        elif system == "Darwin":
+            candidates.append("/Applications/GraXpert.app/Contents/MacOS/GraXpert")
+    elif tool == "starnet2":
+        # StarNet2 has no standard install dir; read SIRIL's config for the configured path.
+        try:
+            for ini in sorted(siril_config_dir().glob("config.*.ini"), reverse=True):
+                for line in ini.read_text(errors="replace").splitlines():
+                    if line.startswith("starnet_exe="):
+                        path = line.split("=", 1)[1].strip().replace("\\\\", "\\")
+                        if path:
+                            candidates.append(path)
+                        break
+        except OSError:
+            pass
+    return candidates
+
+
 def _resolve_tool(cfg: Config, tool: str):
-    # Discover one tool as a plain str path (or None) — used by config-check and preflight.
-    found = discover_tool(tool, config_path=cfg.tool_paths.get(tool))
+    found = discover_tool(tool, config_path=cfg.tool_paths.get(tool),
+                          candidates=_tool_candidates(tool))
     return str(found) if found else None
 
 
@@ -130,7 +170,9 @@ def cmd_mode(args, mode: str) -> int:
     staged = stage_fits(in_dirs, ws.lights)
     print(f"Staged {staged} subs into {ws.lights}")
     if count_fits(ws.lights) < 1:
-        print("ERROR: no .fit subs found in the given folder(s).")
+        print("ERROR: No .fit or .fits sub-exposure files found in the given folder(s).\n"
+              "  Make sure --in points to the folder containing your raw FITS frames\n"
+              "  (e.g. the 'lights' folder from your telescope).")
         return 1
 
     # Build the FULL pipeline (preprocess → finish) up front so resume spans the whole run.
@@ -151,7 +193,8 @@ def cmd_mode(args, mode: str) -> int:
         m = Manifest(mode=mode, target=ws.target, order=order, input_fingerprint=fp)
     save_manifest(m, ws.manifest_path)
     ok = run_pipeline(m, stages, save=lambda mm: save_manifest(mm, ws.manifest_path),
-                      from_stage=args.from_stage, redo=args.redo, force=args.force)
+                      from_stage=args.from_stage, redo=args.redo, force=args.force,
+                      log_dir=ws.logs)
     if not ok:
         return 1
     anchor = ws.linear / f"{ws.target}_Linear.fit"

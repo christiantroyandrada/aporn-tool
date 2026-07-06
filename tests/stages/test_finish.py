@@ -57,7 +57,7 @@ def _fake_run_siril_mosaic_finish(scripts):
     def run(script_path, *, workdir, siril_exe, runner=None, log_path=None):
         text = Path(script_path).read_text(encoding="utf-8")
         scripts.append(text)
-        if "starnet -starmask" in text:
+        if "starnet" in text:
             # workdir passed to run_siril is ws.work; the script's own `cd` line names the
             # real scratch dir SIRIL executes in — parse it out.
             import re

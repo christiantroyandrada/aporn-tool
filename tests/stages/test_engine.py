@@ -79,4 +79,4 @@ def test_unknown_from_stage_fails_loud_without_running():
     ok = run_pipeline(m, stages, save=save, from_stage="nosuch", log=msgs.append)
     assert ok is False
     assert ran == []                                  # nothing ran
-    assert any("unknown stage 'nosuch'" in msg for msg in msgs)
+    assert any("Unknown stage 'nosuch'" in msg for msg in msgs)

@@ -22,11 +22,24 @@ MODE_TOOLS = {
 MODE_NEEDS_GRAXPERT = {"dso-mosaic", "dso-reflection-nebula"}
 
 
+_TOOL_HELP = {
+    "siril": "Download SIRIL from https://siril.org/download/ and install it. "
+             "On Windows the installer puts siril-cli.exe in Program Files automatically.",
+    "graxpert": "Download GraXpert from https://github.com/Stuermer/GraXpert/releases and install it. "
+                "After installing, open it once so it creates its config folder.",
+    "starnet2": "StarNet2 is configured inside SIRIL: open SIRIL > Preferences > External Programs "
+                "and set the StarNet2 executable path. Download from https://www.starnetastro.com/ "
+                "if you don't have it yet.",
+}
+
+
 def check_binary(name: str, path) -> CheckResult:
     if path:
         return CheckResult(name, True, f"found: {path}")
+    help_text = _TOOL_HELP.get(name, f"Install {name}.")
     return CheckResult(name, False, "not found on PATH or known locations",
-                       f"Install {name}, or set its path in aporntool.config.json, then re-run.")
+                       f"{help_text}\n         Or set its path manually in aporntool.config.json "
+                       f'under tool_paths.{name}, then re-run.')
 
 
 def check_graxpert_models(model_root, need=("bge", "denoise")) -> CheckResult:

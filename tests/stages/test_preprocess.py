@@ -1,11 +1,13 @@
 from aporntool.stages.preprocess import (
-    convert_cmds, calibrate_cmds, register_cmds, stack_cmds, mirrorx_cmds,
+    convert_and_calibrate_cmds, register_cmds, stack_cmds, mirrorx_cmds,
     is_single_panel, spcc_in_preprocess,
 )
 
 
-def test_calibrate_debayers_no_darks():
-    assert calibrate_cmds() == ["calibrate light -debayer"]
+def test_convert_and_calibrate_merged():
+    cmds = convert_and_calibrate_cmds()
+    assert "link light -out=../01_process" in cmds
+    assert "calibrate light -debayer" in cmds
 
 
 def test_mosaic_register_uses_wcs_and_framing_max():
@@ -72,14 +74,14 @@ def test_mosaic_stage_ids_and_order(tmp_path):
     ws = Workspace(tmp_path, "M31"); ws.create()
     stages = build_preprocess_stages("dso-mosaic", ws, Config.default(),
                                      resolve_target("M31"), siril_exe="siril-cli")
-    assert [s.id for s in stages] == ["convert", "calibrate", "register", "stack", "spcc"]
+    assert [s.id for s in stages] == ["calibrate", "register", "stack", "spcc"]
 
 
 def test_emission_stage_ids_include_mirrorx_and_no_spcc(tmp_path):
     ws = Workspace(tmp_path, "M8"); ws.create()
     stages = build_preprocess_stages("dso-emission-nebula", ws, Config.default(),
                                      resolve_target("M8"), siril_exe="siril-cli")
-    assert [s.id for s in stages] == ["convert", "calibrate", "register", "stack", "mirrorx"]
+    assert [s.id for s in stages] == ["calibrate", "register", "stack", "mirrorx"]
 
 
 def test_emission_mirrorx_stage_saves_golden_anchor(tmp_path):

@@ -21,7 +21,7 @@ def mosaic_finish_cmds(clean_name, out_name, *, star_reduce=0.5) -> list:
         "satu 0.7",
         f"save {out_name}_stretched",
         f"load {out_name}_stretched",
-        "starnet -starmask",                       # → starless + starmask_<name>
+        "starnet",                                  # → starless + starmask_<name>
         f"save {out_name}_starless",
         # Blend a fraction of the stars back (full removal looks AI-generated, #10).
         f'pm "${out_name}_starless$+$starmask_{out_name}_stretched$*{star_reduce}"',

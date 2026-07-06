@@ -20,14 +20,14 @@ def spcc_in_preprocess(mode: str) -> bool:
     return mode in _SPCC_IN_PREPROCESS
 
 
-def convert_cmds() -> list:
-    # Link all staged .fit in the lights dir into a SIRIL sequence named "light".
-    return ["link light -out=../01_process"]
-
-
-def calibrate_cmds() -> list:
-    # Debayer only — the Seestar already calibrated internally, so no darks/flats/bias.
-    return ["calibrate light -debayer"]
+def convert_and_calibrate_cmds() -> list:
+    # SIRIL 1.4.3 `link -out=` does NOT write a .seq file, so the calibrate step must
+    # run in the SAME siril-cli invocation where the sequence is still in memory.
+    return [
+        "link light -out=../01_process",
+        "cd ../01_process",
+        "calibrate light -debayer",
+    ]
 
 
 def register_cmds(mode: str) -> list:
@@ -73,28 +73,33 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
         # Generate the .ssf, save it to logs/ (reproducibility), run it, log the console output.
         text = build_ssf(commands, cd=cd)
         script = write_ssf(text, ws.logs / f"{stage_id}.ssf")
-        run_siril(script, workdir=ws.work, siril_exe=siril_exe, runner=runner,
-                  log_path=ws.logs / f"{stage_id}.log")
+        return run_siril(script, workdir=ws.work, siril_exe=siril_exe, runner=runner,
+                         log_path=ws.logs / f"{stage_id}.log")
 
     stages = []
 
-    # convert: link the staged lights into a sequence (run from the lights dir).
-    stages.append(Stage(
-        "convert",
-        lambda: _run("convert", convert_cmds(), cd=str(ws.lights)),
-        lambda: (proc / "light_.seq").exists()))
-
-    # calibrate: debayer (run from the process dir where the sequence now lives).
+    # convert+calibrate: link staged lights and debayer in a single SIRIL session
+    # (SIRIL 1.4.3 link -out= doesn't write a .seq, so calibrate must share the process).
     stages.append(Stage(
         "calibrate",
-        lambda: _run("calibrate", calibrate_cmds(), cd=str(proc)),
+        lambda: _run("calibrate", convert_and_calibrate_cmds(), cd=str(ws.lights)),
         lambda: (proc / "pp_light_.seq").exists()))
 
     # register: WCS (mosaic) or 2-pass (single-panel), then apply registration.
-    stages.append(Stage(
-        "register",
-        lambda: _run("register", register_cmds(mode), cd=str(proc)),
-        lambda: (proc / "r_pp_light_.seq").exists()))
+    if mode == "dso-mosaic":
+        # seqplatesolve has a known false-negative in SIRIL 1.4 (reports failure even when every
+        # frame solved), which aborts the script before seqapplyreg. Work around by running them
+        # in separate SIRIL processes within a single stage.
+        def _register_mosaic():
+            _run("platesolve", ["seqplatesolve pp_light -force -nocache"], cd=str(proc))
+            _run("applyreg", ["seqapplyreg pp_light -filter-round=2.5k -framing=max"], cd=str(proc))
+        stages.append(Stage("register", _register_mosaic,
+                            lambda: (proc / "r_pp_light_.seq").exists()))
+    else:
+        stages.append(Stage(
+            "register",
+            lambda: _run("register", register_cmds(mode), cd=str(proc)),
+            lambda: (proc / "r_pp_light_.seq").exists()))
 
     anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
 
@@ -104,24 +109,19 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
         lambda: _run("stack", stack_cmds(mode), cd=str(proc)),
         lambda: (proc / "result.fit").exists()))
 
-    if is_single_panel(mode):
-        # mirrorx: undo the Seestar vertical flip. For emission/star-cluster (no SPCC in
-        # preprocess) mirrorx is the LAST preprocess stage, so it also SAVES the golden anchor;
-        # for reflection it just mirrors result in place (SPCC saves the anchor next).
+    if is_single_panel(mode) and not spcc_in_preprocess(mode):
+        # mirrorx: undo the Seestar vertical flip and save the golden anchor.
+        # (Emission/star-cluster — no SPCC in preprocess, so this is the final preprocess stage.)
         def _mirrorx_run():
-            if spcc_in_preprocess(mode):
-                _run("mirrorx", ["mirrorx_single result"], cd=str(proc))
-            else:
-                _run("mirrorx",
-                     ["mirrorx_single result", "load result", f"save {anchor_noext}", "close"],
-                     cd=str(proc))
-        stages.append(Stage(
-            "mirrorx", _mirrorx_run,
-            (lambda: _nonzero(anchor)) if not spcc_in_preprocess(mode)
-            else (lambda: (proc / "result.fit").exists())))
+            _run("mirrorx",
+                 ["mirrorx_single result", "load result", f"save {anchor_noext}", "close"],
+                 cd=str(proc))
+        stages.append(Stage("mirrorx", _mirrorx_run, lambda: _nonzero(anchor)))
 
     if spcc_in_preprocess(mode):
-        # spcc: platesolve + SPCC on result (already mirrored for reflection), then SAVE the anchor.
+        # spcc: platesolve + SPCC on the UN-FLIPPED result (the solver needs original orientation),
+        # then mirrorx for single-panel modes, then save the anchor.
+        # If plate solving fails (dense MW fields, faint targets), fall back to saving without SPCC.
         def _spcc_run():
             cmds = []
             if cfg.catalog_astro and cfg.catalog_photo:
@@ -131,10 +131,19 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                 platesolve_cmd(coords=f"{target.ra},{target.dec}",
                                focal=cfg.seestar_focal_mm, pixel=cfg.seestar_pixel_um),
                 spcc_cmd(),
-                f"save {anchor_noext}",
-                "close",
             ]
-            _run("spcc", cmds, cd=str(proc))
+            if is_single_panel(mode):
+                cmds.append("mirrorx")
+            cmds += [f"save {anchor_noext}", "close"]
+            result = _run("spcc", cmds, cd=str(proc))
+            if result.returncode != 0 and not _nonzero(anchor):
+                print("  WARNING: Plate solving failed -- saving linear stack without SPCC color "
+                      "calibration. Colors may need manual correction in post-processing.")
+                fallback = ["load result"]
+                if is_single_panel(mode):
+                    fallback.append("mirrorx")
+                fallback += [f"save {anchor_noext}", "close"]
+                _run("spcc_fallback", fallback, cd=str(proc))
         stages.append(Stage("spcc", _spcc_run, lambda: _nonzero(anchor)))
 
     return stages

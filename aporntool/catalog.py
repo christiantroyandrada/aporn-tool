@@ -62,4 +62,9 @@ def resolve_target(name: str, coords: str | None = None) -> Target:
         except ValueError:
             raise ValueError(f"--coords must be numeric 'RA,DEC' decimal degrees, got '{coords}'")
         return Target(name.strip(), ra, dec, "unknown", "user coords")
-    raise KeyError(f"Unknown target '{name}'. Pass --coords RA,DEC (decimal degrees).")
+    known = ", ".join(sorted(TARGETS.keys()))
+    raise KeyError(
+        f"Unknown target '{name}'. Either:\n"
+        f"  1) Add --coords RA,DEC (decimal degrees) so the pipeline knows where to point, or\n"
+        f"  2) Use one of the {len(TARGETS)} known targets: {known}"
+    )

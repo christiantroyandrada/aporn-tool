@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 .superpowers/
 aporntool.config.json
+_test_out/
+.claude/

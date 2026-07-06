@@ -35,9 +35,15 @@ def fix_double_ext(out_path) -> Path:
 
 def run_graxpert(argv, out_path, *, runner=subprocess.run, poll=0.5, settle=0.0,
                  timeout=600.0, sleep=time.sleep) -> Path:
-    # Run GraXpert, then (when settle>0) wait for the output file's size to stop changing for
-    # `settle` seconds before handing it to SIRIL — the CLI can return before the write finishes.
-    runner(argv, capture_output=True, text=True)
+    proc = runner(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        print(f"  WARNING: GraXpert exited with code {proc.returncode}.")
+        if "CUDA" in stderr or "out of memory" in stderr.lower():
+            print("  This looks like a GPU memory issue. Try closing other apps or re-running.")
+        elif stderr:
+            last = stderr.splitlines()[-1]
+            print(f"  Last error line: {last}")
     if settle > 0:
         base = out_path if str(out_path).endswith(".fits") else Path(str(out_path) + ".fits")
         double = Path(str(base) + ".fits")

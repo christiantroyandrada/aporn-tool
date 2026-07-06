@@ -16,8 +16,9 @@ def _install_fakes(monkeypatch):
         proc = Path(workdir) / "01_process"
         proc.mkdir(parents=True, exist_ok=True)
         {
-            "convert": proc / "light_.seq",
             "calibrate": proc / "pp_light_.seq",
+            "platesolve": proc / "pp_light_.seq",
+            "applyreg": proc / "r_pp_light_.seq",
             "register": proc / "r_pp_light_.seq",
         }.get(name, proc / "result.fit").write_text("x", encoding="utf-8")
         (proc / "result.fit").write_text("x", encoding="utf-8")
@@ -31,7 +32,7 @@ def _install_fakes(monkeypatch):
             (linear / f"{target}_cropped.fit").write_text("x", encoding="utf-8")
         if name == "finish":
             script_text = Path(script_path).read_text(encoding="utf-8")
-            if "starnet -starmask" in script_text:
+            if "starnet" in script_text:
                 # mosaic finish: runs in the ws.finish scratch cwd with BARE names; the real
                 # stage copies deliverables out to the --out root afterward.
                 scratch = Path(workdir) / "05_finish"
