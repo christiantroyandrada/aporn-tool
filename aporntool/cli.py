@@ -12,7 +12,7 @@ from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
-from aporntool.locations import graxpert_model_root, siril_config_dir
+from aporntool.locations import graxpert_model_root, siril_starnet_exe
 from aporntool.stages.preprocess import build_preprocess_stages
 from aporntool.stages.finish import build_finish_stages
 from aporntool.stages.engine import run_pipeline
@@ -81,17 +81,10 @@ def _tool_candidates(tool: str) -> list[str]:
         elif system == "Darwin":
             candidates.append("/Applications/GraXpert.app/Contents/MacOS/GraXpert")
     elif tool == "starnet2":
-        # StarNet2 has no standard install dir; read SIRIL's config for the configured path.
-        try:
-            for ini in sorted(siril_config_dir().glob("config.*.ini"), reverse=True):
-                for line in ini.read_text(errors="replace").splitlines():
-                    if line.startswith("starnet_exe="):
-                        path = line.split("=", 1)[1].strip().replace("\\\\", "\\")
-                        if path:
-                            candidates.append(path)
-                        break
-        except OSError:
-            pass
+        # No standard install dir; fall back to whatever StarNet is configured inside SIRIL.
+        exe = siril_starnet_exe()
+        if exe:
+            candidates.append(exe)
     return candidates
 
 
@@ -159,7 +152,8 @@ def cmd_mode(args, mode: str) -> int:
     # Preflight is environment validation — run it before any staging/compute (FR-PF1).
     tool_paths = {t: _resolve_tool(cfg, t) for t in MODE_TOOLS.get(mode, [])}
     results = run_preflight(mode, tool_paths=tool_paths,
-                            graxpert_model_root=graxpert_model_root())
+                            graxpert_model_root=graxpert_model_root(),
+                            siril_starnet_exe=siril_starnet_exe())
     failed = [r for r in results if not r.ok]
     print("Preflight:")
     for r in results:

@@ -28,6 +28,12 @@ def _install_fakes(monkeypatch, tmp_path):
         (d / "model.onnx").write_bytes(b"x")
     monkeypatch.setattr("aporntool.cli.graxpert_model_root", lambda: models)
 
+    # Mosaic preflight also checks StarNet is configured inside SIRIL (starnet_exe); point it
+    # at a real temp file so the test doesn't depend on this machine's SIRIL config.
+    starnet = tmp_path / "starnet2"
+    starnet.write_bytes(b"x")
+    monkeypatch.setattr("aporntool.cli.siril_starnet_exe", lambda: str(starnet))
+
     import aporntool.stages.preprocess as pp
     import aporntool.stages.finish as fin
 

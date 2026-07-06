@@ -20,6 +20,9 @@ MODE_TOOLS = {
 }
 # Only these modes run GraXpert, so only they need its AI models present.
 MODE_NEEDS_GRAXPERT = {"dso-mosaic", "dso-reflection-nebula"}
+# Only the mosaic finish uses SIRIL's built-in `starnet` command (reflection calls the StarNet2
+# CLI directly), so only mosaic needs StarNet configured *inside* SIRIL.
+MODE_NEEDS_SIRIL_STARNET = {"dso-mosaic"}
 
 
 _TOOL_HELP = {
@@ -58,9 +61,28 @@ def check_graxpert_models(model_root, need=("bge", "denoise")) -> CheckResult:
         "Model Manager) to download the AI models, then re-run the same command to continue.")
 
 
-def run_preflight(mode, *, tool_paths, graxpert_model_root=None) -> list:
+def check_siril_starnet(starnet_exe) -> CheckResult:
+    # The mosaic finish uses SIRIL's built-in `starnet` command, which runs whatever executable is
+    # set INSIDE SIRIL (its starnet_exe config) — StarNet being on PATH is NOT enough. (Reflection
+    # calls the StarNet2 CLI directly, so it doesn't need this.) Catches the case where preflight's
+    # binary check passes via PATH but SIRIL itself has no StarNet configured.
+    if starnet_exe and Path(starnet_exe).exists():
+        return CheckResult("siril-starnet", True, f"SIRIL starnet_exe: {starnet_exe}")
+    detail = ("no StarNet executable configured inside SIRIL" if not starnet_exe
+              else f"SIRIL's configured StarNet path is missing: {starnet_exe}")
+    return CheckResult(
+        "siril-starnet", False, detail,
+        "The mosaic finish uses SIRIL's built-in StarNet. Open SIRIL > Preferences > External "
+        "Programs and set the StarNet executable (e.g. starnet2), then re-run. StarNet being on "
+        "PATH is not enough for mosaic mode.")
+
+
+def run_preflight(mode, *, tool_paths, graxpert_model_root=None, siril_starnet_exe=None) -> list:
     # Build the full check list for the mode; the caller prints failures + remediations.
     results = [check_binary(t, tool_paths.get(t)) for t in MODE_TOOLS.get(mode, [])]
     if mode in MODE_NEEDS_GRAXPERT and graxpert_model_root is not None:
         results.append(check_graxpert_models(graxpert_model_root))
+    # siril_starnet_exe is None when the caller opts out of the check; "" means "checked, unset".
+    if mode in MODE_NEEDS_SIRIL_STARNET and siril_starnet_exe is not None:
+        results.append(check_siril_starnet(siril_starnet_exe))
     return results
