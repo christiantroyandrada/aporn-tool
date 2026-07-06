@@ -80,3 +80,25 @@ def test_unknown_from_stage_fails_loud_without_running():
     assert ok is False
     assert ran == []                                  # nothing ran
     assert any("Unknown stage 'nosuch'" in msg for msg in msgs)
+
+
+def test_stage_that_raises_fails_cleanly_without_propagating():
+    # A stage whose run() raises (e.g. auto-crop reading a missing golden anchor on --from) must be
+    # caught: marked FAILED, reported, and NOT allowed to escape as a raw traceback.
+    ran = []
+    m = _mk(["a", "b"])
+
+    def boom():
+        ran.append("a")
+        raise FileNotFoundError("golden anchor not found: /x/M31_Linear.fit")
+
+    stages = [Stage("a", boom, lambda: True),
+              Stage("b", lambda: ran.append("b"), lambda: True)]
+    _, save = _saver()
+    msgs = []
+    ok = run_pipeline(m, stages, save=save, log=msgs.append)   # must not raise
+    assert ok is False
+    assert m.stage("a").status == StageStatus.FAILED.value
+    assert ran == ["a"]                                        # b never runs after a raises
+    assert any("FAILED at stage 'a'" in msg for msg in msgs)
+    assert any("golden anchor not found" in msg for msg in msgs)   # the cause is surfaced

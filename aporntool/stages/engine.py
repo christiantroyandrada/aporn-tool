@@ -31,6 +31,24 @@ _STAGE_HINTS = {
 }
 
 
+def _report_failure(sid, headline, log, log_dir) -> None:
+    # One actionable failure report: what failed, the likely cause, the log tail, how to resume.
+    hint = _STAGE_HINTS.get(sid, "")
+    log(f"\nFAILED at stage '{sid}': {headline}")
+    if hint:
+        log(f"  Likely cause: {hint}")
+    if log_dir:
+        logfile = Path(log_dir) / f"{sid}.log"
+        if logfile.exists():
+            log(f"  Full log: {logfile}")
+            tail = logfile.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+            if tail:
+                log("  Last few lines:")
+                for line in tail[-5:]:
+                    log(f"    {line}")
+    log(f"\n  To retry: re-run the same command (it resumes from '{sid}' automatically).")
+
+
 def run_pipeline(manifest, stages, *, save, from_stage=None, redo=None, force=False,
                  log=print, log_dir=None) -> bool:
     target = redo or from_stage
@@ -48,27 +66,22 @@ def run_pipeline(manifest, stages, *, save, from_stage=None, redo=None, force=Fa
             continue
         stage = by_id[sid]
         manifest.mark(sid, StageStatus.RUNNING); save(manifest)
-        stage.run()
+        try:
+            stage.run()
+        except Exception as exc:
+            # A stage that RAISES (missing input on --from/--redo, a tool crash, a bad path) must
+            # fail loud but clean (NFR-3) — record it and print the actionable report, never a raw
+            # traceback that leaves the manifest stuck at "running".
+            manifest.mark(sid, StageStatus.FAILED, error=f"stage '{sid}' raised: {exc!r}")
+            save(manifest)
+            _report_failure(sid, str(exc) or exc.__class__.__name__, log, log_dir)
+            return False
         if stage.produces():
             manifest.mark(sid, StageStatus.DONE, error=""); save(manifest)
         else:
             manifest.mark(sid, StageStatus.FAILED,
                           error=f"stage '{sid}' produced no valid output")
             save(manifest)
-            hint = _STAGE_HINTS.get(sid, "")
-            log(f"\nFAILED at stage '{sid}': the expected output file was not created.")
-            if hint:
-                log(f"  Likely cause: {hint}")
-            if log_dir:
-                logfile = Path(log_dir) / f"{sid}.log"
-                if logfile.exists():
-                    log(f"  Full log: {logfile}")
-                    tail = logfile.read_text(encoding="utf-8", errors="replace").strip().splitlines()
-                    if tail:
-                        last = tail[-min(5, len(tail)):]
-                        log("  Last few lines:")
-                        for line in last:
-                            log(f"    {line}")
-            log(f"\n  To retry: re-run the same command (it resumes from '{sid}' automatically).")
+            _report_failure(sid, "the expected output file was not created.", log, log_dir)
             return False
     return True
