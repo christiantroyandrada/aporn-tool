@@ -9,6 +9,7 @@ from aporntool.stages.finish_cmds import (
     mosaic_finish_cmds, emission_finish_cmds, cluster_finish_cmds,
 )
 from aporntool.stages.preprocess import spcc_in_preprocess
+from aporntool.stages.reflection_finish import run_reflection_finish
 
 
 def _nonzero(p) -> bool:
@@ -17,7 +18,7 @@ def _nonzero(p) -> bool:
 
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
-                        crop=None, star_reduce=0.5, runner=None):
+                        starnet_exe=None, crop=None, star_reduce=0.5, runner=None):
     runner = runner or subprocess.run
     anchor = ws.linear / f"{ws.target}_Linear"          # SIRIL load name (no .fit)
     out_name = str((ws.out_root / f"{ws.target}_final").as_posix())
@@ -63,7 +64,28 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             _siril("finish", cmds, cd=str(ws.linear))
         stages.append(Stage("finish", _finish, lambda: _nonzero(out_name + ".tif")))
 
-    # reflection handled in Task 5.
+    elif mode == "dso-reflection-nebula":
+        cropped = ws.linear / f"{ws.target}_cropped"
+        bge_out = ws.graxpert / f"{ws.target}_bge"
+        clean = ws.graxpert / f"{ws.target}_clean"
+        # bge: crop (SIRIL) then GraXpert BGE on the cropped linear (same as the mosaic branch).
+        def _bge():
+            _siril("crop", [f"load {anchor.as_posix()}",
+                            *( [f"crop {crop}"] if crop else [] ),
+                            f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
+            run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
+                                 str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
+        stages.append(Stage("bge", _bge, lambda: _nonzero(f"{bge_out}.fits")))
+
+        def _denoise():
+            run_graxpert(denoise_cmd(graxpert_exe, f"{bge_out}.fits", str(clean),
+                                     gpu=True, strength=0.8), clean, runner=runner, settle=3.0)
+        stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
+
+        def _finish():
+            run_reflection_finish(f"{clean}.fits", out_name, starnet_exe=starnet_exe, runner=runner)
+        stages.append(Stage("finish", _finish, lambda: _nonzero(out_name + ".tif")))
+
     return stages
 
 

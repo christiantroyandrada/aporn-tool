@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--crop", default=None, help="SIRIL crop box 'X Y W H' (default: no crop)")
         pm.add_argument("--star-reduce", type=float, default=0.5,
                         help="mosaic star-blend fraction after StarNet removal (default 0.5)")
+        pm.add_argument("--profile", default=None, help="color/stretch preset override")
     return parser
 
 
@@ -130,9 +131,10 @@ def cmd_mode(args, mode: str) -> int:
     # Build the FULL pipeline (preprocess → finish) up front so resume spans the whole run.
     siril = _resolve_tool(cfg, "siril")
     graxpert = _resolve_tool(cfg, "graxpert")
+    starnet = _resolve_tool(cfg, "starnet2")
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
-                                  crop=args.crop, star_reduce=args.star_reduce)
+                                  starnet_exe=starnet, crop=args.crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]
     fp = input_fingerprint(iter_fits(ws.lights))
     # Resume from the on-disk manifest when it still matches (mode/order/fingerprint); else fresh.

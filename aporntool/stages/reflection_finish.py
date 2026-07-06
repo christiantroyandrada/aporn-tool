@@ -1,4 +1,5 @@
 """Reflection-nebula dual-layer finish (pure numpy), ported from the /dso-reflection-nebula skill."""
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -50,19 +51,40 @@ def screen_blend(a, b):
     return np.clip(1 - (1 - np.asarray(a, np.float64)) * (1 - np.asarray(b, np.float64)), 0, 1)
 
 
-def save_deliverables(rgb01, out_stem) -> None:
-    # Write the finished composite as a PNG preview (8-bit, for quick viewing) and a
-    # 16-bit TIFF (the actual deliverable — the user does final curves/crop in Canva/Photoshop
-    # from this file, per the /dso-reflection-nebula skill's "16-bit TIFF is the deliverable" rule).
+def save_deliverables(rgb01, out_stem):
+    # Write the four FR-27 deliverables sharing one base name: .fits/.tif(16-bit)/.png/.jpg.
     from PIL import Image
     import tifffile
+    from astropy.io import fits
 
-    stem = Path(out_stem)
-    stem.parent.mkdir(parents=True, exist_ok=True)
-    arr = np.clip(np.asarray(rgb01, np.float64), 0, 1)
+    out = Path(out_stem)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    a = np.clip(np.asarray(rgb01, np.float64), 0, 1)
+    a8 = (a * 255 + 0.5).astype(np.uint8)
+    Image.fromarray(a8).save(str(out) + ".png")
+    Image.fromarray(a8).save(str(out) + ".jpg", quality=95)
+    tifffile.imwrite(str(out) + ".tif", (a * 65535 + 0.5).astype(np.uint16), photometric="rgb")
+    fits.writeto(str(out) + ".fits", np.moveaxis(a.astype(np.float32), -1, 0), overwrite=True)  # FITS = [C,H,W]
+    return Path(str(out) + ".tif")
 
-    a8 = (arr * 255 + 0.5).astype(np.uint8)
-    Image.fromarray(a8).save(str(stem.with_suffix(".png")))
 
-    a16 = (arr * 65535 + 0.5).astype(np.uint16)
-    tifffile.imwrite(str(stem.with_suffix(".tif")), a16, photometric="rgb")
+def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run, target_bg=0.35):
+    # Load the GraXpert _clean linear, autostretch, remove stars with StarNet2, fix the grid artifact,
+    # rebuild the star layer, screen-blend it back over the starless layer, and write deliverables.
+    import tifffile
+    from astropy.io import fits
+
+    d = fits.getdata(str(clean_fits)).astype(np.float64)
+    img = np.moveaxis(d, 0, -1) if d.ndim == 3 else np.stack([d] * 3, -1)   # [C,H,W]->HWC
+    img = np.clip(img, 0, None)
+    mx = np.percentile(img, 99.995) or 1.0
+    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=target_bg)
+    work = Path(out_stem).parent
+    tin, tout = work / "_sn_in.tif", work / "_sn_out.tif"
+    tifffile.imwrite(str(tin), (stretched * 65535 + 0.5).astype(np.uint16), photometric="rgb")
+    runner([str(starnet_exe), "-i", str(tin), "-o", str(tout)], capture_output=True, text=True)
+    starless = fix_starnet_grid(tifffile.imread(str(tout)).astype(np.float64) / 65535.0)
+    stars = np.clip(stretched - starless, 0, 1)          # what StarNet removed = the star layer
+    combined = screen_blend(starless, stars)             # stars back on top, no blown highlights (#10)
+    save_deliverables(combined, out_stem)
+    return Path(str(out_stem) + ".tif")

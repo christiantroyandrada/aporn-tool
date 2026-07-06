@@ -41,3 +41,11 @@ def test_emission_finish_writes_deliverables_and_spcc(tmp_path):
     text = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
     assert 'spcc "-oscsensor=Sony IMX662"' in text
     assert "savetif" in text and "M8_final" in text
+
+
+def test_reflection_finish_stage_ids(tmp_path):
+    ws = Workspace(tmp_path, "M78"); ws.create()
+    stages = build_finish_stages("dso-reflection-nebula", ws, Config.default(),
+                                 resolve_target("M78", coords="0,0"),
+                                 siril_exe="siril-cli", graxpert_exe="GraXpert.exe", starnet_exe="starnet2")
+    assert [s.id for s in stages] == ["bge", "denoise", "finish"]
