@@ -53,7 +53,13 @@ def resolve_target(name: str, coords: str | None = None) -> Target:
     if key in TARGETS:
         return TARGETS[key]
     if coords:
-        # User supplied RA,DEC for a target we don't know — build one on the fly.
-        ra_str, dec_str = coords.split(",")
-        return Target(name.strip(), float(ra_str), float(dec_str), "unknown", "user coords")
+        # User supplied RA,DEC for a target we don't know — parse defensively for a clean error.
+        parts = coords.split(",")
+        if len(parts) != 2:
+            raise ValueError(f"--coords must be 'RA,DEC' in decimal degrees, got '{coords}'")
+        try:
+            ra, dec = float(parts[0]), float(parts[1])
+        except ValueError:
+            raise ValueError(f"--coords must be numeric 'RA,DEC' decimal degrees, got '{coords}'")
+        return Target(name.strip(), ra, dec, "unknown", "user coords")
     raise KeyError(f"Unknown target '{name}'. Pass --coords RA,DEC (decimal degrees).")

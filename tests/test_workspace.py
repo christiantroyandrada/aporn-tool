@@ -33,3 +33,25 @@ def test_stage_fits_copies_only_fits(tmp_path):
     n = stage_fits([src], dest)
     assert n == 1
     assert (dest / "a.fit").exists() and not (dest / "a.jpg").exists()
+
+
+def test_stage_fits_keeps_both_on_cross_source_name_collision(tmp_path):
+    # Two nights each export Light_0001.fit (Seestar resets counters) — both must survive.
+    n1 = tmp_path / "night1"; n1.mkdir()
+    n2 = tmp_path / "night2"; n2.mkdir()
+    (n1 / "Light_0001.fit").write_bytes(b"one")
+    (n2 / "Light_0001.fit").write_bytes(b"two")
+    dest = tmp_path / "_work" / "M31" / "00_lights"
+    n = stage_fits([n1, n2], dest)
+    assert n == 2
+    assert (dest / "Light_0001.fit").exists()
+    assert (dest / "s1_Light_0001.fit").exists()
+
+
+def test_stage_fits_is_idempotent_on_rerun(tmp_path):
+    # Re-running the same command must not re-stage or double-count.
+    src = tmp_path / "night1"; src.mkdir()
+    (src / "Light_0001.fit").write_bytes(b"x")
+    dest = tmp_path / "_work" / "M31" / "00_lights"
+    assert stage_fits([src], dest) == 1
+    assert stage_fits([src], dest) == 0

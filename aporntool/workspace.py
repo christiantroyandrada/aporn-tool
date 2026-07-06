@@ -68,14 +68,26 @@ def stage_fits(sources, dest) -> int:
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     staged = 0
-    for src in sources:
+    renamed = 0
+    for i, src in enumerate(sources):
         for f in iter_fits(src):
             target = dest / f.name
             if target.exists():
-                continue
+                # Same file already staged (idempotent re-run) → skip, don't recount.
+                if os.path.samefile(f, target):
+                    continue
+                # A DIFFERENT file with the same name (e.g. two nights both have Light_0001.fit)
+                # → tag with the source index so BOTH survive instead of silently dropping one.
+                target = dest / f"s{i}_{f.name}"
+                renamed += 1
+                if target.exists() and os.path.samefile(f, target):
+                    continue
             try:
-                os.link(f, target)
+                os.link(f, target)       # hardlink = instant, no extra disk
             except OSError:
-                shutil.copy2(f, target)
+                shutil.copy2(f, target)  # different drive/FS → fall back to a copy
             staged += 1
+    if renamed:
+        # Don't let a night silently vanish — tell the user we disambiguated collisions.
+        print(f"  note: renamed {renamed} colliding sub name(s) across sources (s<N>_ prefix) so none are dropped")
     return staged

@@ -94,7 +94,11 @@ def cmd_mode(args, mode: str) -> int:
         if not d.is_dir():
             print(f"ERROR: input folder does not exist: {d}")
             return 1
-    target = resolve_target(args.target, args.coords)
+    try:
+        target = resolve_target(args.target, args.coords)
+    except (KeyError, ValueError) as e:
+        print(f"ERROR: {e}")
+        return 1
 
     # Preflight is environment validation — run it before any staging/compute (FR-PF1).
     tool_paths = {t: _resolve_tool(cfg, t) for t in MODE_TOOLS.get(mode, [])}

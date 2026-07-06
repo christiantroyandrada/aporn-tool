@@ -20,10 +20,6 @@ def test_main_version_flag_returns_zero(capsys):
     assert aporntool.__version__ in capsys.readouterr().out
 
 
-import json
-from aporntool.cli import main
-
-
 def test_config_check_reports_missing_tools(capsys, tmp_path, monkeypatch):
     # No tools discoverable → config --check lists them and exits non-zero.
     monkeypatch.setattr("aporntool.cli.discover_tool", lambda name, **kw: None)
@@ -56,3 +52,13 @@ def test_status_reads_manifest(capsys, tmp_path):
     code = main(["status", "--out", str(tmp_path / "out"), "--target", "M8"])
     out = capsys.readouterr().out
     assert code == 0 and "stage" in out and "done" in out.lower()
+
+
+def test_unknown_target_without_coords_errors_cleanly(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr("aporntool.cli.discover_tool", lambda name, **kw: "/usr/bin/" + name)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    code = main(["dso-emission-nebula", "--in", str(subs),
+                 "--out", str(tmp_path / "out"), "--target", "NGC9999"])
+    assert code == 1
+    assert "ERROR" in capsys.readouterr().out       # clean message, not a traceback

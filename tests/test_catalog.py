@@ -19,3 +19,10 @@ def test_unknown_without_coords_raises():
 def test_unknown_with_coords_builds_target():
     t = resolve_target("NGC9999", coords="12.5,-3.25")
     assert t.ra == 12.5 and t.dec == -3.25 and t.mode == "unknown"
+
+
+def test_bad_coords_raise_valueerror():
+    with pytest.raises(ValueError):
+        resolve_target("X", coords="12.5")        # missing DEC
+    with pytest.raises(ValueError):
+        resolve_target("X", coords="a,b")          # non-numeric
