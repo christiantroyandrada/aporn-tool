@@ -109,3 +109,43 @@ def test_spcc_stage_uses_local_gaia_paths_when_configured(tmp_path):
     text = (ws.logs / "spcc.ssf").read_text(encoding="utf-8")
     assert "catalogue_gaia_astro=/g/astro.dat" in text
     assert '"-oscsensor=Sony IMX662"' in text and "platesolve 11.25,41.4" in text
+
+
+def test_spcc_stage_surfaces_online_fallback_and_imprecise_notes(tmp_path, capsys):
+    # When SPCC succeeds but SIRIL falls back to online Gaia or reports an imprecise fit, those
+    # notices should reach the user's stdout, not just the per-stage log.
+    ws = Workspace(tmp_path, "M31"); ws.create()
+
+    def fake_run(cmd, **kw):
+        class R:
+            returncode = 0
+            stdout = ("Local Gaia catalog is unavailable, reverting to online Gaia catalog via ESA\n"
+                      "The photometric color calibration seems to have found an imprecise solution\n"
+                      "Spectrophotometric Color Calibration succeeded.")
+            stderr = ""
+        return R()
+
+    stages = build_preprocess_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+                                     siril_exe="siril-cli", runner=fake_run)
+    next(s for s in stages if s.id == "spcc").run()
+    out = capsys.readouterr().out.lower()
+    assert "online esa gaia" in out            # local-unavailable fallback surfaced
+    assert "imprecise color solution" in out    # imprecise-fit warning surfaced
+
+
+def test_spcc_stage_quiet_when_no_warnings(tmp_path, capsys):
+    # A clean SPCC run prints no notes.
+    ws = Workspace(tmp_path, "M31"); ws.create()
+
+    def fake_run(cmd, **kw):
+        class R:
+            returncode = 0
+            stdout = "Spectrophotometric Color Calibration succeeded."
+            stderr = ""
+        return R()
+
+    stages = build_preprocess_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+                                     siril_exe="siril-cli", runner=fake_run)
+    next(s for s in stages if s.id == "spcc").run()
+    out = capsys.readouterr().out.lower()
+    assert "note:" not in out

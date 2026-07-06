@@ -144,6 +144,17 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                     fallback.append("mirrorx")
                 fallback += [f"save {anchor_noext}", "close"]
                 _run("spcc_fallback", fallback, cd=str(proc))
+            else:
+                # SPCC succeeded -- surface SIRIL's soft warnings that otherwise reach only the
+                # per-stage log, so the user sees HOW the calibration actually ran (FR-PF2 spirit).
+                out = (result.stdout + result.stderr).lower()
+                if "reverting to online" in out or "catalog is unavailable" in out:
+                    print("  note: local Gaia catalog not found -- SPCC used the online ESA Gaia "
+                          "catalog. Install the local catalog for offline/faster runs.")
+                if "imprecise solution" in out:
+                    print("  note: SPCC reported an imprecise color solution (mosaic calibrates "
+                          "before gradient removal); colors may need a tweak, or re-run --redo spcc "
+                          "after installing the local catalog.")
         stages.append(Stage("spcc", _spcc_run, lambda: _nonzero(anchor)))
 
     return stages
