@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.1 — 2026-07-07
+
+Maintenance release — no functional changes.
+
+- **Refreshed the PyPI page.** The 0.3.0 upload was tagged one commit before the README badge/header
+  fix, so its PyPI description still showed a stale "Latest release: v0.2.0" line. PyPI freezes a
+  version's description at upload, so this rebuild (from the corrected README) is the only way to
+  update the page.
+- **CI:** publish-workflow actions bumped off the deprecated Node 20 — `checkout@v7`,
+  `setup-python@v6`, `upload-artifact@v7`, `download-artifact@v8`.
+
 ## v0.3.0 — 2026-07-07
 
 First release published to **PyPI** — `pip install aporn-tool`, then run `aporn-tool <mode> --in …`
