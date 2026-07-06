@@ -140,13 +140,15 @@ synthetic-L) — flagged, not hidden.
 - **FR-5** Missing/empty `--in`, unwritable `--out`, or zero matching input files → fail fast with a
   clear message (mirror the existing `.bat`'s guard checks).
 - **FR-6** Interactive fallback: if `--target`/coords/paths are omitted, prompt for them (the skills
-  already "gather info" this way).
+  already "gather info" this way). **Precedence when they conflict: an explicit flag > `auto` detection
+  (FR-10a) > interactive prompt.**
 
 ### 4.2 Input staging & hygiene
 
 - **FR-7** DSO: copy/**hardlink only `.fit`** into `_work/00_lights/` — Seestar folders also contain
   `.jpg`/`_thn.jpg` that SIRIL's `convert`/`link` would wrongly ingest (hard-won gotcha).
-- **FR-8** Report sub count before starting; abort if below a sane floor.
+- **FR-8** Report sub count before starting; **abort if < 10 subs** (below that, stacking isn't worth
+  it) — overridable with `--min-subs N`.
 - **FR-9** Planetary: probe every clip first (`ffprobe`: codec, res, fps, frame count, **rotation
   metadata**) and echo it.
 - **FR-9a** **Multi-session integration:** `--in` may be passed more than once (or given a parent folder
@@ -214,7 +216,7 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
 | Knob | dso-mosaic | dso-emission | dso-reflection | dso-star-cluster |
 |------|-----------|--------------|----------------|------------------|
 | Registration | `seqplatesolve` + `seqapplyreg -framing=max` (WCS) | `register -2pass` (star) | `register -2pass` (star) | `register -2pass` (star) |
-| Frame filter | `-filter-round=2.5k` | `-filter-round=2.5k` | `-filter-round=2.5k` | `-filter-round=2.5k` **+ FWHM** (tight round stars are the payoff) |
+| Frame filter | `-filter-round=2.5k` | `-filter-round=2.5k` | `-filter-round=2.5k` | `-filter-round=2.5k -filter-wfwhm=2.5k` (**authored** — tighter cull; tight round stars are the payoff) |
 | `-feather` | 100 | — | — | — |
 | `mirrorx` | ❌ (WCS sets orientation) | ✅ `mirrorx_single` | ✅ | ✅ |
 | Background extraction | GraXpert BGE | SIRIL `subsky 1` | GraXpert BGE | SIRIL `subsky 1` |
@@ -226,11 +228,69 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
 - **FR-12a** The core is a single function parameterized by the columns above. The **"golden anchor"**
   (immutable reprocess source, FR-14) is therefore **mode-specific** — the manifest records exactly
   which file it is for the run, so resume/reprocess always restarts from the right place.
+- **FR-12b** **Star-handling stage placement (resolves review finding #9).** `dso-mosaic` runs SIRIL
+  `starnet -starmask` as a **discrete `starnet` stage** in its order. `dso-emission-nebula` (rich
+  fields) and `dso-star-cluster` **keep all stars → no `starnet` stage.** `dso-reflection-nebula`
+  performs star handling **inside its Python dual-layer `finish`** (which calls the StarNet2 CLI
+  directly), so it has **no separate `starnet` stage** — yet StarNet2 is still a real dependency, so
+  preflight correctly lists it for reflection. Rule: **`MODE_ORDER` (named stages) and `MODE_TOOLS`
+  (required binaries) need not be 1:1** — a required tool can be invoked *inside* a stage (e.g.
+  reflection's `finish`) rather than as its own stage. This is consistent by design, not drift.
+
+### 4.4b Stage vocabulary, per-stage I/O & the golden anchor — *the resume contract*
+
+The concrete contract Plan 2/4 build against, and what resume-verification (FR-24b), invalidation
+(FR-24e), and the manifest (FR-23) structurally require. **Canonical stage IDs** (superset; each mode's
+manifest lists its own active subset + order — supersedes the shorter list in FR-24d):
+
+`stage → convert → calibrate → register → stack → mirrorx → spcc → crop → bge → denoise → starnet → finish`
+
+Per-stage I/O (files under `_work/<target>/`; SIRIL sequence basename = `light`):
+
+| Stage | Consumes | Produces | Type | Command / modes |
+|-------|----------|----------|------|-----------------|
+| `stage` | user `--in` `.fit` | `00_lights/*.fit` (hardlinked, collision-safe) | raw CFA 16-bit | all DSO (FR-7/9a) |
+| `convert` | `00_lights/` | `01_process/light_*.fit` + `light_.seq` | CFA seq | `link light -out=../01_process` |
+| `calibrate` | `light_.seq` | `01_process/pp_light_*.fit` + `pp_light_.seq` | debayered RGB seq | `calibrate light -debayer` (no darks/flats) |
+| `register` | `pp_light_.seq` | `01_process/r_pp_light_*.fit` + `r_pp_light_.seq` | registered RGB seq | mosaic: `seqplatesolve`+`seqapplyreg -framing=max`; single: `register -2pass`+`seqapplyreg` |
+| `stack` | `r_pp_light_.seq` | `01_process/result.fit` | linear RGB | `stack r_pp_light rej 3 3 -norm=addscale -output_norm -rgb_equal` (+`-feather=100` mosaic) |
+| `mirrorx` | `result.fit` | `result.fit` (flipped) | linear RGB | **single-panel only** (`mirrorx_single`) |
+| `spcc` | linear RGB | color-calibrated linear | linear RGB | mosaic/reflection: here; emission/cluster: in finish, post-crop |
+| **→ GOLDEN ANCHOR** | | `02_linear/<TARGET>_Linear.fit` | linear RGB | see below (FR-14) |
+| `crop` | `<TARGET>_Linear.fit` | `02_linear/<TARGET>_cropped.fit` | linear RGB | auto (FR-20) + `--pause-crop` |
+| `bge` | cropped | `03_graxpert/<TARGET>_bge.fit` | linear RGB | mosaic/reflection (GraXpert BGE) — Plan 3 |
+| `denoise` | bge / cropped | `03_graxpert/<TARGET>_clean.fit` (GraXpert) / in-place (SIRIL) | linear RGB | GraXpert (mosaic/refl) or SIRIL `denoise` (emission/cluster) — Plan 3 |
+| `starnet` | stretched | `04_starnet/<TARGET>_starless.fit` + `starmask_<TARGET>.fit` | nonlinear RGB | mosaic discrete; reflection inside `finish` (FR-12b) — Plan 4 |
+| `finish` | clean / starless | `<OUT>/<TARGET>_final.{fits,tif,png,jpg}` | nonlinear RGB | ported from the mode's `/dso-*` skill — Plan 4 |
+
+- **FR-12c Golden anchor (FR-14) — one canonical file, mode-specific *state*, recorded in the
+  manifest:** `02_linear/<TARGET>_Linear.fit`. **mosaic & reflection → post-SPCC** (stack → [mirrorx
+  for reflection] → platesolve → spcc → save). **emission & star-cluster → post-stack + post-mirrorx,
+  pre-SPCC** (their SPCC runs later, post-crop, in the finish phase). Every mode's downstream loads
+  exactly this file. Reflection's effective anchor advances to `03_graxpert/<TARGET>_clean.fit` once
+  BGE+denoise run (its Python finish starts there); the manifest always names the current anchor.
+- **FR-12d Preprocess-core scope (what Plan 2 delivers) — per-mode sequence up to the anchor:**
+  - **dso-mosaic:** `stage→convert→calibrate→register(WCS,framing=max)→stack(feather=100)→spcc` → anchor (post-SPCC)
+  - **dso-reflection-nebula:** `stage→convert→calibrate→register(-2pass)→stack→mirrorx→spcc` → anchor (post-SPCC)
+  - **dso-emission-nebula:** `stage→convert→calibrate→register(-2pass)→stack→mirrorx` → anchor (post-stack, pre-SPCC)
+  - **dso-star-cluster:** `stage→convert→calibrate→register(-2pass, +FWHM cull)→stack→mirrorx` → anchor (post-stack, pre-SPCC)
+  - Each stage is `done` only when its produced file(s) exist, are non-zero, and are the expected type
+    (FR-24b). `seqplatesolve` false-negatives are verified by solved-frame count, not exit code (FR-26).
+- **FR-12e Stage folders reflect stage IDs:** on-disk folders are named `NN_<area>/` where the manifest
+  is the source of truth; a mode only creates the folders its sequence uses (emission/cluster never
+  create `03_graxpert/`).
+- **FR-12f Where each `finish` spec lives:** the `finish` command sequences for **mosaic**, **emission
+  (Route A)**, and **reflection** are the corresponding `/dso-*` skill, **ported verbatim** (§8) — §4.4a
+  and §4.4b govern *preprocess* only. **star-cluster** is the sole `finish` authored inline here (§4.8),
+  since it has no prior skill. Plan 4 (finishers) reads those skills; Plan 2 (preprocess core) does not.
 
 ### 4.5 Human-in-the-loop steps
 
-- **FR-20** **Crop (DSO):** default to auto-crop from WCS/target framing + margin; optionally pause to
-  let the user open the linear stack, then accept `X Y W H`. A JPG preview is always written.
+- **FR-20** **Crop (DSO):** auto-crop by default, `--pause-crop` to enter a manual `X Y W H`; a JPG
+  preview is always written. The auto algorithm depends on WCS availability: **mosaic** (plate-solved in
+  preprocess) crops to target framing from catalog RA/DEC + pixel scale with a margin; **single-panel**
+  modes have no WCS yet (they platesolve in finish), so auto-crop **trims the ragged registration
+  borders to the largest rectangle covered by (nearly) all frames, minus a small inward margin.**
 - **FR-21** **AutoStakkert (planetary):** the tool launches AS!4, prints the exact click-path, and
   **waits** for the user to produce the stacks; then it resumes automatically by finding the newest
   `AS_Pxx/*.tif`.
@@ -256,7 +316,9 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
   - StarNet2 weights configured (SIRIL config keys or CLI weights file);
   - SPCC: both local-Gaia catalog paths exist **and the correct sky region** is installed for the
     target (Milky Way vs Galaxy Season — wrong region = "no stars");
-  - enough free disk for raw AVI / intermediate FITS; GPU availability (else CPU fallback).
+  - **enough free disk** — heuristic `≥ 2.5 × (sub count × sub size)` (calibrated `pp_` + registered
+    `r_pp_` copies + stack; `00_lights` is hardlinked so ≈ free), plus GraXpert intermediates for
+    mosaic/reflection. **GPU availability is informational only — never blocking** (CPU fallback, NFR-6).
 - **FR-PF2** Each failed check prints a **specific, actionable remediation** and a one-line "then just
   re-run the same command to continue" (e.g. *"GraXpert denoise model missing → open GraXpert once and
   run Denoise on any image to download it, or use Model Manager; then re-run."*).
@@ -278,10 +340,11 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
   a half-written file never counts as complete (idempotent, atomic-ish stage boundaries).
 - **FR-24c** `aporntool status --out <root>` prints the stage ledger (what's done, what failed + why,
   where to resume) without running anything.
-- **FR-24d** **Canonical stage IDs** (what `--from`/`--redo` accept):
-  `stage → register → stack → [spcc] → crop → [bge] → [denoise] → [starnet] → finish`. Bracketed
-  stages exist only for modes that use them, and **both presence and order are per-mode** (per §4.4a —
-  e.g. emission/star-cluster run `spcc` *after* `crop`). The manifest lists the run's active sequence.
+- **FR-24d** **Canonical stage IDs** (what `--from`/`--redo` accept) = the complete vocabulary in
+  **§4.4b**: `stage → convert → calibrate → register → stack → mirrorx → spcc → crop → bge → denoise →
+  starnet → finish`. Both presence and order are per-mode (§4.4b/§4.4a — e.g. emission/star-cluster run
+  `spcc` *after* `crop`, and only single-panel modes run `mirrorx`). The manifest lists the run's active
+  sequence **and the current golden-anchor file** (FR-12c).
 - **FR-24e** **Invalidation rule** (what makes "just re-run" *safe* instead of *stale*). Each stage
   records the resolved params it depends on; changing a param re-runs **that stage and everything
   downstream, nothing upstream**. A stretch/saturation change re-runs only `finish`; changing
@@ -291,6 +354,8 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
   anchor is flagged **stale** and preprocessing re-runs — the tool never serves a finish built on
   different data than the manifest claims.
 - **FR-25** Save a **JPG preview after every major stage** into `_work/previews/` for eyeball QA.
+  Linear-stage previews are **display-autostretched** (a temporary STF for visibility only — never fed
+  downstream).
 - **FR-26** Verify each stage's output before proceeding; treat SIRIL's known `seqplatesolve`
   "finalization failed" as a **false negative** — verify by counting solved frames, not by exit code.
 
@@ -303,6 +368,7 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
 - **FR-29** **Finishing profiles:** `--profile {mosaic|emission|reflection|star-cluster|galaxy}` selects
   the color + stretch preset; every finishing param stays overridable by flag/env (FR-22). Cluster
   default = keep all stars, star-color saturation from a background floor, highlight-protected stretch.
+  (`galaxy` is a color/stretch preset used *within* `dso-mosaic`, **not** a separate mode.)
 
 ### 4.8 Star-cluster pipeline (authored recipe for the new mode)
 
@@ -310,26 +376,33 @@ pipeline. This table is the contract (it replaces the earlier "shared core" over
 > the Seestar capture gotchas. **Philosophy: the stars ARE the subject.** This inverts every other DSO
 > mode: no star removal, showcase star *colour*, and — for globulars — resolve into the core.
 
-**Preprocess** (single-panel core, §4.4a): stage `.fit`-only → `link` → `calibrate -debayer` →
-`register -2pass` → `seqapplyreg -filter-round=2.5k` **plus a tighter FWHM cull** (round, tight stars
-matter more here than for fuzzy nebulae) → `stack r_pp_light rej 3 3 -norm=addscale -output_norm
--rgb_equal` → `mirrorx_single`. Golden anchor = the post-stack linear.
+**Preprocess** (single-panel core, §4.4b): stage `.fit`-only → `link` → `calibrate -debayer` →
+`register -2pass` → `seqapplyreg -filter-round=2.5k -filter-wfwhm=2.5k` (**authored** tighter cull;
+round, tight stars matter more here than for fuzzy nebulae) → `stack r_pp_light rej 3 3 -norm=addscale
+-output_norm -rgb_equal` → `mirrorx_single`. Golden anchor = `02_linear/<TARGET>_Linear.fit` (post-stack
++ mirrorx, pre-SPCC; FR-12c).
 
-**Finish (SIRIL, broadband + SPCC):**
+**Finish (SIRIL, broadband + SPCC):** *(authored; validate on a real M13/M45 run — D7)*
 ```
-load TARGET_stack
-crop ...                         # frame the cluster + a little sky
-subsky 1                         # (or -rbf on a clean high-latitude field)
+load <TARGET>_Linear             # the golden anchor (FR-12c)
+crop <auto|X Y W H>              # FR-20; frame the cluster + a little sky
+subsky 1                         # gradient (or -rbf on a clean high-latitude field)
 platesolve -catalog=localgaia
-spcc "-oscsensor=Sony IMX662" "-oscfilter=UV/IR Block" "-whiteref=Average Spiral Galaxy" -catalog=localgaia
+spcc "-oscsensor=Sony IMX662" "-oscfilter=UV/IR Block" "-whiteref=<RESOLVED>" -catalog=localgaia
 denoise -mod=0.5                 # LIGHT ONLY — heavy/chroma denoise greys star colour + merges faint stars
-autostretch -linked              # gentle, conservative; linked preserves SPCC colour
-ght -D=0.7 -B=3 -HP=0.9 -human   # highlight-protected: globular cores must RESOLVE, not blow to white
-satu 0.6 0.1                     # star-colour pop from a background floor (blue-white vs golden giants)
+autostretch -linked              # gentle; linked preserves SPCC colour
+ght -D=0.7 -B=3 -HP=0.9 -human   # AUTHORED default — highlight-protected so cores resolve, not blow white
+satu 0.6 0.1                     # AUTHORED default — star-colour pop from a background floor
 # rmgreen ONLY if SPCC was skipped
-savetif TARGET_final
-savejpg TARGET_final 95
+save <TARGET>_final              # writes .fit; then also emit the other deliverables (FR-27):
+savetif <TARGET>_final
+savepng <TARGET>_final
+savejpg <TARGET>_final 95
 ```
+- **`-whiteref` and the SPCC catalog region are resolved per target** from the catalog (§9 tags region:
+  Milky-Way vs Galaxy-Season; FR-16/gotcha #17). `Average Spiral Galaxy` is an **authored** cluster
+  whiteref default to validate (a stellar field may want a different reference). `-oscfilter=UV/IR Block`
+  = the Seestar IRCUT broadband case.
 
 **Sub-types & knobs:**
 - **Globular** (M13, M22, M4, M92, M5, M15, M3): dense bright core → strongest highlight protection +
@@ -522,7 +595,9 @@ illustrative and the **manifest is the source of truth**. Handling multiple targ
 4. **`autostretch -linked`**, never unlinked (linked preserves SPCC color ratios).
 5. **`rmgreen` only when NOT using SPCC** (SPCC already neutralizes green).
 6. **GraXpert double `.fits.fits`** — auto-rename before SIRIL load.
-7. **Denoise on linear data, before stretch** (0.8 sweet spot; 1.0 over-sharpens).
+7. **Denoise on linear data, before stretch.** The **0.8 sweet spot is the GraXpert AI strength**
+   (mosaic/reflection; 1.0 over-sharpens) — **not** the same scale as SIRIL `denoise -mod=` (emission
+   uses bare `denoise`, or `-mod=0.8 -da3d` for faint SNRs; star-cluster uses `-mod=0.5`, light).
 8. **Seestar `.fit`-only staging**; **`mirrorx` on single-panel modes only** (emission / reflection /
    star-cluster) — mosaic orientation comes from WCS, so mosaic does **not** `mirrorx`.
 9. **StarNet grid fix** (median5 + gaussian1.5 on raw output) before any further processing.
