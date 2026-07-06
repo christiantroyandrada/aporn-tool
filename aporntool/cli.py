@@ -12,6 +12,7 @@ from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
 from aporntool.locations import graxpert_model_root
 from aporntool.stages.preprocess import build_preprocess_stages
+from aporntool.stages.finish import build_finish_stages
 from aporntool.stages.engine import run_pipeline
 
 DSO_MODES = ["dso-mosaic", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
@@ -44,6 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--from", dest="from_stage", default=None, help="restart at this stage id")
         pm.add_argument("--redo", default=None, help="re-run this stage id and everything downstream")
         pm.add_argument("--force", action="store_true", help="re-run all stages, ignore checkpoints")
+        pm.add_argument("--crop", default=None, help="SIRIL crop box 'X Y W H' (default: no crop)")
+        pm.add_argument("--star-reduce", type=float, default=0.5,
+                        help="mosaic star-blend fraction after StarNet removal (default 0.5)")
     return parser
 
 
@@ -123,15 +127,15 @@ def cmd_mode(args, mode: str) -> int:
         print("ERROR: no .fit subs found in the given folder(s).")
         return 1
 
-    # Build this mode's preprocess stages, record their ids as the manifest order, and run the
-    # pipeline to the golden anchor. Each stage checkpoints so a failure can be fixed + resumed.
+    # Build the FULL pipeline (preprocess → finish) up front so resume spans the whole run.
     siril = _resolve_tool(cfg, "siril")
+    graxpert = _resolve_tool(cfg, "graxpert")
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
+    stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
+                                  crop=args.crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]
     fp = input_fingerprint(iter_fits(ws.lights))
-    # Resume from the on-disk manifest when it still matches this run; a changed input fingerprint
-    # (repointed/grown subs, FR-24f) or a changed mode/stage set means the golden anchor is stale →
-    # start fresh so preprocessing re-runs. Otherwise reuse it so `done` stages are skipped (FR-24).
+    # Resume from the on-disk manifest when it still matches (mode/order/fingerprint); else fresh.
     if ws.manifest_path.exists():
         m = load_manifest(ws.manifest_path)
         if m.mode != mode or m.order != order or m.input_fingerprint != fp:
@@ -144,8 +148,11 @@ def cmd_mode(args, mode: str) -> int:
     if not ok:
         return 1
     anchor = ws.linear / f"{ws.target}_Linear.fit"
-    print(f"Preprocess complete. Golden anchor: {anchor}")
-    print("(Finishing stages land in Plan 4.)")
+    tif = ws.out_root / f"{ws.target}_final.tif"
+    if tif.exists():
+        print(f"Done. Deliverables at {ws.out_root}: {ws.target}_final.(fits|tif|png|jpg)")
+    else:
+        print(f"Preprocess complete. Golden anchor: {anchor}  (finish stages: see mode)")
     return 0
 
 
