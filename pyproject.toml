@@ -3,7 +3,13 @@ name = "aporntool"
 version = "0.1.0"
 description = "Astropornography tool — one command from raw subs to a finished astrophoto"
 requires-python = ">=3.10"
-dependencies = []                      # stdlib-only for the foundation; finishers add numpy/astropy later
+dependencies = [
+    "numpy",
+    "astropy",
+    "scipy",
+    "Pillow",
+    "tifffile",
+]                                       # numpy/scipy power the reflection dual-layer finish; astropy/Pillow/tifffile handle deliverable I/O
 
 [project.scripts]
 aporntool = "aporntool.cli:main"       # installs an `aporntool` command
