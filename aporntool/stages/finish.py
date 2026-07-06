@@ -1,4 +1,5 @@
 """Assemble per-mode finish stages: golden anchor → deliverables at the --out root."""
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -8,13 +9,38 @@ from aporntool.tools.graxpert import bge_cmd, denoise_cmd, run_graxpert
 from aporntool.stages.finish_cmds import (
     mosaic_finish_cmds, emission_finish_cmds, cluster_finish_cmds,
 )
-from aporntool.stages.preprocess import spcc_in_preprocess
 from aporntool.stages.reflection_finish import run_reflection_finish
 
 
 def _nonzero(p) -> bool:
     p = Path(p)
     return p.exists() and p.stat().st_size > 0
+
+
+def _all_deliverables(ws) -> bool:
+    # FR-4/FR-27: all four deliverables must exist (and be non-empty) at the --out root.
+    base = ws.out_root / f"{ws.target}_final"
+    return all(_nonzero(f"{base}.{e}") for e in ("fits", "tif", "png", "jpg"))
+
+
+def _publish(scratch_dir, ws) -> None:
+    # Copy the four deliverables SIRIL wrote (bare names) in the finish scratch cwd out to the
+    # --out root, renaming SIRIL's .fit to the .fits deliverable name.
+    base = ws.out_root / f"{ws.target}_final"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    for src_ext, dst_ext in ((".fit", ".fits"), (".tif", ".tif"), (".png", ".png"), (".jpg", ".jpg")):
+        src = Path(scratch_dir) / f"{ws.target}_final{src_ext}"
+        if src.exists():
+            shutil.copy2(src, f"{base}{dst_ext}")
+
+
+def _promote_fit_to_fits(ws) -> None:
+    # Emission/cluster save straight to the --out root; SIRIL's `save` writes .fit, but the
+    # FR-27 deliverable name is .fits — rename in place.
+    base = ws.out_root / f"{ws.target}_final"
+    fit = base.with_suffix(".fit")
+    if fit.exists():
+        fit.replace(base.with_suffix(".fits"))
 
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
@@ -51,9 +77,16 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
-            _siril("finish", mosaic_finish_cmds(clean.as_posix(), out_name,
-                                                star_reduce=star_reduce), cd=str(ws.graxpert))
-        stages.append(Stage("finish", _finish, lambda: _nonzero(out_name + ".tif")))
+            # SIRIL's `pm`/`starnet -starmask` only resolve BARE names in the current working
+            # dir — run this script with cd=ws.finish, load the _clean image via a path relative
+            # to that scratch dir, and save under a bare out name so every SIRIL command in
+            # mosaic_finish_cmds stays bare. Then copy the real deliverables out to --out root.
+            bare_out = f"{ws.target}_final"
+            rel_clean = f"../03_graxpert/{ws.target}_clean"
+            _siril("finish", mosaic_finish_cmds(rel_clean, bare_out,
+                                                star_reduce=star_reduce), cd=str(ws.finish))
+            _publish(ws.finish, ws)
+        stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     elif mode in ("dso-emission-nebula", "dso-star-cluster"):
         gen = emission_finish_cmds if mode == "dso-emission-nebula" else cluster_finish_cmds
@@ -62,7 +95,9 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                 cfg.catalog_astro and cfg.catalog_photo) else []
             cmds += gen(anchor.as_posix(), out_name, box=crop, spcc=spcc)
             _siril("finish", cmds, cd=str(ws.linear))
-        stages.append(Stage("finish", _finish, lambda: _nonzero(out_name + ".tif")))
+            # SIRIL's `save` writes .fit; the FR-27 deliverable name is .fits.
+            _promote_fit_to_fits(ws)
+        stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     elif mode == "dso-reflection-nebula":
         cropped = ws.linear / f"{ws.target}_cropped"
@@ -83,8 +118,11 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
-            run_reflection_finish(f"{clean}.fits", out_name, starnet_exe=starnet_exe, runner=runner)
-        stages.append(Stage("finish", _finish, lambda: _nonzero(out_name + ".tif")))
+            # StarNet2 scratch tifs must not leak into the --out root (FR-4) — keep them under
+            # the target's own _work/05_finish scratch dir.
+            run_reflection_finish(f"{clean}.fits", out_name, starnet_exe=starnet_exe,
+                                  runner=runner, scratch_dir=ws.finish)
+        stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     return stages
 

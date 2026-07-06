@@ -49,3 +49,78 @@ def test_reflection_finish_stage_ids(tmp_path):
                                  resolve_target("M78", coords="0,0"),
                                  siril_exe="siril-cli", graxpert_exe="GraXpert.exe", starnet_exe="starnet2")
     assert [s.id for s in stages] == ["bge", "denoise", "finish"]
+
+
+def _fake_run_siril_mosaic_finish(scripts):
+    # Fabricate the mosaic finish deliverables under ws.finish (bare names, cwd=ws.finish),
+    # exactly like real SIRIL would when `cd` points there and names are bare.
+    def run(script_path, *, workdir, siril_exe, runner=None, log_path=None):
+        text = Path(script_path).read_text(encoding="utf-8")
+        scripts.append(text)
+        if "starnet -starmask" in text:
+            # workdir passed to run_siril is ws.work; the script's own `cd` line names the
+            # real scratch dir SIRIL executes in — parse it out.
+            import re
+            m = re.search(r'cd "([^"]+)"', text)
+            finish_dir = Path(m.group(1))
+            # Determine the bare out name from a `save <name>_stretched` line.
+            m2 = re.search(r"save (\S+)_stretched", text)
+            bare = m2.group(1)
+            for ext in ("fit", "tif", "png", "jpg"):
+                (finish_dir / f"{bare}.{ext}").write_text("x", encoding="utf-8")
+        class R: returncode = 0; stdout = ""; stderr = ""
+        return R()
+    return run
+
+
+def test_mosaic_finish_runs_in_scratch_cwd_with_bare_names_and_publishes_four_deliverables(tmp_path, monkeypatch):
+    import aporntool.stages.finish as fin
+    ws = Workspace(tmp_path, "M31"); ws.create()
+    # Fabricate the GraXpert _clean.fits the finish stage loads via a relative path.
+    clean = ws.graxpert / "M31_clean.fits"
+    clean.write_text("x", encoding="utf-8")
+
+    scripts = []
+    monkeypatch.setattr(fin, "run_siril", _fake_run_siril_mosaic_finish(scripts))
+
+    stages = build_finish_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+                                 siril_exe="siril-cli", graxpert_exe="GraXpert.exe")
+    finish = next(s for s in stages if s.id == "finish")
+    finish.run()
+
+    text = scripts[-1]
+    assert f'cd "{ws.finish}"' in text
+    assert "../03_graxpert/M31_clean" in text
+    # bare out name only in the command lines (everything after the `cd` line) — no absolute
+    # out_root path baked into save/starnet/pm commands.
+    body = text.split("\n", 2)[-1]
+    assert str(ws.out_root) not in body
+    assert "M31_final" in body
+
+    base = ws.out_root / "M31_final"
+    for ext in ("fits", "tif", "png", "jpg"):
+        assert (base.parent / f"M31_final.{ext}").exists(), f"missing {ext}"
+    assert finish.produces()
+
+
+def test_emission_finish_renames_fit_to_fits_for_produces(tmp_path, monkeypatch):
+    import aporntool.stages.finish as fin
+    ws = Workspace(tmp_path, "M8"); ws.create()
+
+    def fake_run_siril(script_path, *, workdir, siril_exe, runner=None, log_path=None):
+        # SIRIL only ever writes .fit; deliverable lands directly at the --out root.
+        (ws.out_root / "M8_final.fit").write_text("x", encoding="utf-8")
+        for ext in ("tif", "png", "jpg"):
+            (ws.out_root / f"M8_final.{ext}").write_text("x", encoding="utf-8")
+        class R: returncode = 0; stdout = ""; stderr = ""
+        return R()
+    monkeypatch.setattr(fin, "run_siril", fake_run_siril)
+
+    stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
+                                 siril_exe="siril-cli")
+    finish = next(s for s in stages if s.id == "finish")
+    finish.run()
+
+    assert (ws.out_root / "M8_final.fits").exists()
+    assert not (ws.out_root / "M8_final.fit").exists()
+    assert finish.produces()

@@ -68,7 +68,8 @@ def save_deliverables(rgb01, out_stem):
     return Path(str(out) + ".tif")
 
 
-def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run, target_bg=0.35):
+def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run,
+                          target_bg=0.35, scratch_dir=None):
     # Load the GraXpert _clean linear, autostretch, remove stars with StarNet2, fix the grid artifact,
     # rebuild the star layer, screen-blend it back over the starless layer, and write deliverables.
     import tifffile
@@ -79,7 +80,10 @@ def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subproces
     img = np.clip(img, 0, None)
     mx = np.percentile(img, 99.995) or 1.0
     stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=target_bg)
-    work = Path(out_stem).parent
+    # StarNet2 scratch tifs must NOT leak into the --out root (FR-4); default to the caller's
+    # scratch dir, falling back to out_stem's parent so the pre-existing unit test still works.
+    work = Path(scratch_dir) if scratch_dir is not None else Path(out_stem).parent
+    work.mkdir(parents=True, exist_ok=True)
     tin, tout = work / "_sn_in.tif", work / "_sn_out.tif"
     tifffile.imwrite(str(tin), (stretched * 65535 + 0.5).astype(np.uint16), photometric="rgb")
     runner([str(starnet_exe), "-i", str(tin), "-o", str(tout)], capture_output=True, text=True)

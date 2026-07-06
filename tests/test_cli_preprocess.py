@@ -29,10 +29,13 @@ def _install_fake_siril(monkeypatch, tmp_home, calls):
         target = Path(workdir).name           # workdir == _work/<target>
         (linear / f"{target}_Linear.fit").write_text("x", encoding="utf-8")
         if name == "finish":
-            # The finish stage (emission/cluster/mosaic) writes deliverables at the --out root
-            # (one level above _work/<target>).
+            # The finish stage (emission/cluster) writes deliverables at the --out root (one
+            # level above _work/<target>); SIRIL's `save` produces .fit, which the stage then
+            # renames to .fits (FR-27's deliverable name).
             out_root = Path(workdir).parent.parent
-            (out_root / f"{target}_final.tif").write_text("x", encoding="utf-8")
+            (out_root / f"{target}_final.fit").write_text("x", encoding="utf-8")
+            for ext in ("tif", "png", "jpg"):
+                (out_root / f"{target}_final.{ext}").write_text("x", encoding="utf-8")
         class R: returncode = 0; stdout = ""; stderr = ""
         return R()
 

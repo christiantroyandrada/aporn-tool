@@ -30,10 +30,21 @@ def _install_fakes(monkeypatch):
             # mosaic bge stage: SIRIL crop writes <TARGET>_cropped.fit into 02_linear.
             (linear / f"{target}_cropped.fit").write_text("x", encoding="utf-8")
         if name == "finish":
-            # emission/cluster/mosaic finish writes deliverables at the --out root.
-            out_root = Path(workdir).parent.parent
-            for ext in ("fits", "tif", "png", "jpg"):
-                (out_root / f"{target}_final.{ext}").write_text("x", encoding="utf-8")
+            script_text = Path(script_path).read_text(encoding="utf-8")
+            if "starnet -starmask" in script_text:
+                # mosaic finish: runs in the ws.finish scratch cwd with BARE names; the real
+                # stage copies deliverables out to the --out root afterward.
+                scratch = Path(workdir) / "05_finish"
+                scratch.mkdir(parents=True, exist_ok=True)
+                for ext in ("fit", "tif", "png", "jpg"):
+                    (scratch / f"{target}_final.{ext}").write_text("x", encoding="utf-8")
+            else:
+                # emission/cluster finish writes deliverables directly at the --out root
+                # (SIRIL only ever produces .fit; the stage renames it to .fits).
+                out_root = Path(workdir).parent.parent
+                (out_root / f"{target}_final.fit").write_text("x", encoding="utf-8")
+                for ext in ("tif", "png", "jpg"):
+                    (out_root / f"{target}_final.{ext}").write_text("x", encoding="utf-8")
 
         class R: returncode = 0; stdout = ""; stderr = ""
         return R()
@@ -69,3 +80,13 @@ def test_mosaic_run_produces_final_deliverable(tmp_path, monkeypatch):
     code = main(["dso-mosaic", "--in", str(subs), "--out", str(out), "--target", "M31"])
     assert code == 0
     assert (out / "M31_final.tif").exists()
+
+
+def test_spaced_out_path_rejected_with_clear_error(tmp_path, monkeypatch, capsys):
+    _install_fakes(monkeypatch)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    out = tmp_path / "out with spaces"
+    code = main(["dso-emission-nebula", "--in", str(subs), "--out", str(out), "--target", "M8"])
+    assert code == 1
+    assert "must not contain spaces" in capsys.readouterr().out

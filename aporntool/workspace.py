@@ -33,6 +33,10 @@ class Workspace:
         return self.work / "03_graxpert"
 
     @property
+    def finish(self) -> Path:      # scratch cwd for SIRIL finish scripts (bare-name gotcha)
+        return self.work / "05_finish"
+
+    @property
     def previews(self) -> Path:
         return self.work / "previews"
 
@@ -45,7 +49,8 @@ class Workspace:
         return self.work / "aporntool.json"
 
     def create(self) -> None:
-        for d in (self.lights, self.process, self.linear, self.graxpert, self.previews, self.logs):
+        for d in (self.lights, self.process, self.linear, self.graxpert, self.finish,
+                  self.previews, self.logs):
             d.mkdir(parents=True, exist_ok=True)
 
     def deliverable(self, ext: str) -> Path:

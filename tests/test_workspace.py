@@ -15,6 +15,13 @@ def test_create_makes_dirs(tmp_path):
     assert ws.lights.is_dir() and ws.logs.is_dir()
 
 
+def test_finish_scratch_dir_is_namespaced_and_created(tmp_path):
+    ws = Workspace(tmp_path, "M31")
+    assert ws.finish == tmp_path / "_work" / "M31" / "05_finish"
+    ws.create()
+    assert ws.finish.is_dir()
+
+
 def test_iter_fits_ignores_jpg_and_thumbnails(tmp_path):
     (tmp_path / "Light_0001.fit").write_bytes(b"x")
     (tmp_path / "Light_0002.fits").write_bytes(b"x")

@@ -103,6 +103,12 @@ def cmd_mode(args, mode: str) -> int:
         print(f"ERROR: {e}")
         return 1
 
+    ws = Workspace(Path(args.out), target.name.upper().replace(" ", ""))
+    if " " in str(ws.out_root):
+        print("ERROR: --out path must not contain spaces (SIRIL path limitation). "
+              "Choose a space-free output folder. (Full spaced-path support is planned.)")
+        return 1
+
     # Preflight is environment validation — run it before any staging/compute (FR-PF1).
     tool_paths = {t: _resolve_tool(cfg, t) for t in MODE_TOOLS.get(mode, [])}
     results = run_preflight(mode, tool_paths=tool_paths,
@@ -120,7 +126,6 @@ def cmd_mode(args, mode: str) -> int:
         print("\nPreflight OK (--preflight-only).")
         return 0
 
-    ws = Workspace(Path(args.out), target.name.upper().replace(" ", ""))
     ws.create()
     staged = stage_fits(in_dirs, ws.lights)
     print(f"Staged {staged} subs into {ws.lights}")

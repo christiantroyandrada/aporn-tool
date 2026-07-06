@@ -62,3 +62,35 @@ def test_run_reflection_finish_produces_deliverables(tmp_path):
     out = run_reflection_finish(clean, str(tmp_path / "M78_final"),
                                 starnet_exe="starnet2", runner=fake_starnet)
     assert Path(str(out)).exists() or (tmp_path / "M78_final.tif").exists()
+
+
+def test_run_reflection_finish_writes_starnet_scratch_to_given_scratch_dir(tmp_path):
+    # The StarNet2 temp tifs must NOT be written next to the deliverables (--out root, FR-4);
+    # they belong in a caller-supplied scratch dir under _work.
+    clean = tmp_path / "clean.fits"
+    fits.writeto(str(clean), np.random.RandomState(2).rand(3, 16, 16).astype(np.float32))
+
+    scratch = tmp_path / "_work" / "M78" / "05_finish"
+    scratch.mkdir(parents=True)
+    out_root = tmp_path / "out"
+    out_root.mkdir()
+
+    def fake_starnet(cmd, **kw):
+        i = cmd[cmd.index("-i") + 1]
+        o = cmd[cmd.index("-o") + 1]
+        # StarNet2 scratch files must land in the scratch dir, not the --out root.
+        assert Path(i).parent == scratch
+        assert Path(o).parent == scratch
+        tifffile.imwrite(o, tifffile.imread(i))
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    run_reflection_finish(clean, str(out_root / "M78_final"),
+                          starnet_exe="starnet2", runner=fake_starnet, scratch_dir=scratch)
+    assert (out_root / "M78_final.tif").exists()
+    assert not (out_root / "_sn_in.tif").exists()
+    assert not (out_root / "_sn_out.tif").exists()
