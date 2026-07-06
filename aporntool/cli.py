@@ -127,8 +127,17 @@ def cmd_mode(args, mode: str) -> int:
     # pipeline to the golden anchor. Each stage checkpoints so a failure can be fixed + resumed.
     siril = _resolve_tool(cfg, "siril")
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
-    m = Manifest(mode=mode, target=ws.target, order=[s.id for s in stages],
-                 input_fingerprint=input_fingerprint(iter_fits(ws.lights)))
+    order = [s.id for s in stages]
+    fp = input_fingerprint(iter_fits(ws.lights))
+    # Resume from the on-disk manifest when it still matches this run; a changed input fingerprint
+    # (repointed/grown subs, FR-24f) or a changed mode/stage set means the golden anchor is stale →
+    # start fresh so preprocessing re-runs. Otherwise reuse it so `done` stages are skipped (FR-24).
+    if ws.manifest_path.exists():
+        m = load_manifest(ws.manifest_path)
+        if m.mode != mode or m.order != order or m.input_fingerprint != fp:
+            m = Manifest(mode=mode, target=ws.target, order=order, input_fingerprint=fp)
+    else:
+        m = Manifest(mode=mode, target=ws.target, order=order, input_fingerprint=fp)
     save_manifest(m, ws.manifest_path)
     ok = run_pipeline(m, stages, save=lambda mm: save_manifest(mm, ws.manifest_path),
                       from_stage=args.from_stage, redo=args.redo, force=args.force)

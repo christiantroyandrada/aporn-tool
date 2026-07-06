@@ -2,18 +2,20 @@ from pathlib import Path
 from aporntool.cli import main
 
 
-def _install_fake_siril(monkeypatch, tmp_home):
+def _install_fake_siril(monkeypatch, tmp_home, calls):
     # Pretend all tools are found, and make run_siril a no-op that fabricates each stage's output
-    # so the pipeline advances to the golden anchor without real SIRIL.
+    # so the pipeline advances to the golden anchor without real SIRIL. `calls` records the stage
+    # name (script filename) of every invocation so tests can assert whether a stage was re-run.
     monkeypatch.setattr("aporntool.cli.discover_tool", lambda name, **kw: "/usr/bin/" + name)
 
     import aporntool.stages.preprocess as pp
 
     def fake_run_siril(script_path, *, workdir, siril_exe, runner=None, log_path=None):
         # Read which stage this is from the script filename and touch its expected output.
+        name = Path(script_path).stem
+        calls.append(name)
         proc = Path(workdir) / "01_process"
         proc.mkdir(parents=True, exist_ok=True)
-        name = Path(script_path).stem
         {
             "convert": proc / "light_.seq",
             "calibrate": proc / "pp_light_.seq",
@@ -32,7 +34,7 @@ def _install_fake_siril(monkeypatch, tmp_home):
 
 
 def test_emission_run_reaches_golden_anchor(capsys, tmp_path, monkeypatch):
-    _install_fake_siril(monkeypatch, tmp_path)
+    _install_fake_siril(monkeypatch, tmp_path, [])
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
@@ -43,11 +45,14 @@ def test_emission_run_reaches_golden_anchor(capsys, tmp_path, monkeypatch):
 
 
 def test_rerun_is_idempotent_and_resumes(capsys, tmp_path, monkeypatch):
-    _install_fake_siril(monkeypatch, tmp_path)
+    calls = []
+    _install_fake_siril(monkeypatch, tmp_path, calls)
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
     args = ["dso-emission-nebula", "--in", str(subs), "--out", str(out), "--target", "M8"]
     assert main(args) == 0
-    # Second run: all stages already done → still exits 0 (resume, nothing to redo).
-    assert main(args) == 0
+    assert len(calls) >= 4                 # run 1 executed the preprocess stages
+    calls.clear()
+    assert main(args) == 0                 # run 2: all stages already done
+    assert calls == []                     # resume → NO stage re-run (this is the regression guard)
