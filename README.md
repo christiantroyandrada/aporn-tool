@@ -42,7 +42,7 @@ with any OSC `.fit` subs, and runs natively on **Windows, macOS (incl. Apple Sil
 
 ```
 raw .fit subs ──► stage ──► SIRIL: calibrate ─► register ─► stack ─► [SPCC] ─► golden linear stack
-                                                                                      │
+                                                                                       │
    deliverables ◄── finish ◄── [StarNet] ◄── [GraXpert BGE + denoise] ◄── [auto-crop] ◄┘
    (.tif/.png/.jpg/.fits)
 ```
