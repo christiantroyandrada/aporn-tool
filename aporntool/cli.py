@@ -11,15 +11,10 @@ from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_
 from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
 from aporntool.locations import graxpert_model_root
+from aporntool.stages.preprocess import build_preprocess_stages
+from aporntool.stages.engine import run_pipeline
 
 DSO_MODES = ["dso-mosaic", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
-# The stage order the manifest tracks per mode (finish/details land in Plan 2).
-MODE_ORDER = {
-    "dso-mosaic": ["stage", "register", "stack", "spcc", "crop", "bge", "denoise", "starnet", "finish"],
-    "dso-emission-nebula": ["stage", "register", "stack", "crop", "spcc", "denoise", "finish"],
-    "dso-reflection-nebula": ["stage", "register", "stack", "spcc", "crop", "bge", "denoise", "finish"],
-    "dso-star-cluster": ["stage", "register", "stack", "crop", "spcc", "denoise", "finish"],
-}
 ALL_TOOLS = ["siril", "graxpert", "starnet2", "ffmpeg"]
 
 
@@ -46,6 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--coords", default=None, help="RA,DEC if target is unknown")
         pm.add_argument("--config", default="aporntool.config.json")
         pm.add_argument("--preflight-only", action="store_true")
+        pm.add_argument("--from", dest="from_stage", default=None, help="restart at this stage id")
+        pm.add_argument("--redo", default=None, help="re-run this stage id and everything downstream")
+        pm.add_argument("--force", action="store_true", help="re-run all stages, ignore checkpoints")
     return parser
 
 
@@ -86,8 +84,8 @@ def cmd_status(args) -> int:
 
 
 def cmd_mode(args, mode: str) -> int:
-    # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + checkpoint.
-    # Pipeline stages themselves arrive in Plan 2 — this proves the skeleton + preflight gate.
+    # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + run the
+    # preprocess pipeline through to the golden anchor (finishing stages land in Plan 4).
     cfg = load_config(args.config)
     in_dirs = [to_input_dir(sanitize_dropped_path(p)) for p in args.inputs]
     for d in in_dirs:
@@ -125,10 +123,20 @@ def cmd_mode(args, mode: str) -> int:
         print("ERROR: no .fit subs found in the given folder(s).")
         return 1
 
-    m = Manifest(mode=mode, target=ws.target, order=MODE_ORDER[mode],
+    # Build this mode's preprocess stages, record their ids as the manifest order, and run the
+    # pipeline to the golden anchor. Each stage checkpoints so a failure can be fixed + resumed.
+    siril = _resolve_tool(cfg, "siril")
+    stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
+    m = Manifest(mode=mode, target=ws.target, order=[s.id for s in stages],
                  input_fingerprint=input_fingerprint(iter_fits(ws.lights)))
     save_manifest(m, ws.manifest_path)
-    print("Preflight OK. (Pipeline stages land in Plan 2.)")
+    ok = run_pipeline(m, stages, save=lambda mm: save_manifest(mm, ws.manifest_path),
+                      from_stage=args.from_stage, redo=args.redo, force=args.force)
+    if not ok:
+        return 1
+    anchor = ws.linear / f"{ws.target}_Linear.fit"
+    print(f"Preprocess complete. Golden anchor: {anchor}")
+    print("(Finishing stages land in Plan 4.)")
     return 0
 
 
