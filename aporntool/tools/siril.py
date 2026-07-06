@@ -40,3 +40,33 @@ def run_siril(script_path, *, workdir, siril_exe, runner=subprocess.run, log_pat
         # Keep the console output next to the script for debugging a failed stage.
         Path(log_path).write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     return result
+
+
+def gaia_catalog_cmds(astro_path: str, photo_path: str) -> list:
+    # siril-cli does NOT auto-read the local Gaia catalogs — set both paths in-script or it
+    # falls back to the dead online server. _astro is a FILE, _photo is a FOLDER.
+    return [
+        f"set core.catalogue_gaia_astro={astro_path}",
+        f"set core.catalogue_gaia_photo={photo_path}",
+    ]
+
+
+def platesolve_cmd(*, coords=None, focal=None, pixel=None, catalog="localgaia") -> str:
+    # With coords we seed the solve (mosaic stack); blind (no coords) re-solves a framed image.
+    parts = ["platesolve"]
+    if coords:
+        parts.append(coords)
+    if focal is not None:
+        parts.append(f"-focal={focal:g}")
+    if pixel is not None:
+        parts.append(f"-pixelsize={pixel:g}")
+    parts.append(f"-catalog={catalog}")
+    return " ".join(parts)
+
+
+def spcc_cmd(*, sensor="Sony IMX662", osc_filter="UV/IR Block",
+             whiteref="Average Spiral Galaxy", catalog="localgaia") -> str:
+    # Quote the WHOLE token, flag name included ("-oscsensor=Sony IMX662") — the other form
+    # ("-oscsensor=...") makes siril-cli error "Invalid argument". (gotcha #3)
+    return (f'spcc "-oscsensor={sensor}" "-oscfilter={osc_filter}" '
+            f'"-whiteref={whiteref}" -catalog={catalog}')
