@@ -1,0 +1,39 @@
+# Changelog
+
+## v0.2.0 — 2026-07-07
+
+First cross-platform, end-to-end-verified release. One command turns raw OSC sub-exposures into a
+finished, share-ready astrophoto.
+
+### Highlights
+- Runs on **Windows, macOS (incl. Apple Silicon), and Linux** — Siril/GraXpert/StarNet2/ffmpeg are
+  resolved from PATH → standard per-OS install locations → config, with no hard-coded paths.
+- **`dso-mosaic` verified end-to-end** on a real 922-sub M31 Seestar mosaic: SIRIL WCS assembly →
+  GraXpert background extraction + AI denoise → StarNet2 → finished `.tif/.png/.jpg/.fits`.
+- **Checkpoint + auto-resume:** re-run the same command to continue from the first unfinished stage;
+  the golden linear stack is preserved so re-finishing never re-stacks.
+- **Preflight** validates tools, GraXpert AI models, and (for mosaic) SIRIL's StarNet config before
+  any heavy compute, each with an actionable remediation message.
+
+### Modes
+`dso-mosaic` (galaxies/mosaics) · `dso-emission-nebula` · `dso-reflection-nebula` ·
+`dso-star-cluster`. Mosaic is rig-verified end-to-end; the reflection dual-layer finish (StarNet2
+CLI + grid-fix + dual-layer blend) is smoke-tested on real linear data; emission and star-cluster
+are code-complete and unit-tested.
+
+### Fixed
+- **Auto-crop** removes irregular `framing=max` mosaic borders (largest-signal rectangle;
+  block-covered-only-if-fully-covered so no black leaks in; NaN/inf-safe) and uses the correct SIRIL
+  top-down crop coordinates (the y-axis was previously flipped).
+- **macOS path detection**: GraXpert models under `~/Library/Application Support/GraXpert/` and SIRIL
+  1.4.x config under `org.siril.Siril/`; preflight now catches "StarNet not configured inside SIRIL"
+  for mosaic mode instead of failing at the finish stage.
+- **imagecodecs** is now a dependency so the reflection finish can decode StarNet's LZW-compressed
+  TIFF output (it previously crashed reading the starless layer).
+- **Resume never crashes**: a stage that raises fails loud-but-clean with the log tail; a missing
+  golden anchor on `--from`/`--redo` gives an actionable message.
+
+### Known limitations
+- Emission / reflection / star-cluster are not yet rig-validated on real data.
+- Planetary mode and `aporntool auto` (FITS-header mode detection) are not implemented.
+- The final crop/curves/watermark are done by hand from the 16-bit TIFF; auto-crop is conservative.
