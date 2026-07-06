@@ -2,6 +2,8 @@
 
 **One command from raw sub-exposures to a finished, share-ready astrophoto.**
 
+📦 **Latest release:** [v0.2.0](https://github.com/christiantroyandrada/aporn-tool/releases/latest) — version history in the [changelog](CHANGELOG.md).
+
 aPornTool takes a folder of raw astrophotography subs and drives them through the full
 linear→nonlinear editing pipeline — stacking, photometric colour calibration, gradient and noise
 removal, colour-preserving stretch, and star management — leaving only the deliverables in your
