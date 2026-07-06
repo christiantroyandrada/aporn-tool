@@ -1,5 +1,14 @@
 from pathlib import Path
+import numpy as np
+from astropy.io import fits
 from aporntool.cli import main
+
+
+def _write_fake_fits(path):
+    # Auto-crop (the default) reads real FITS data from the golden anchor at stage run time, so
+    # fakes standing in for SIRIL's anchor save must write valid FITS, not a bare "x" text file.
+    arr = np.full((3, 10, 10), 0.5, np.float32)
+    fits.writeto(str(path), arr, overwrite=True)
 
 
 def _install_fake_siril(monkeypatch, tmp_home, calls):
@@ -27,7 +36,7 @@ def _install_fake_siril(monkeypatch, tmp_home, calls):
         linear = Path(workdir) / "02_linear"
         linear.mkdir(parents=True, exist_ok=True)
         target = Path(workdir).name           # workdir == _work/<target>
-        (linear / f"{target}_Linear.fit").write_text("x", encoding="utf-8")
+        _write_fake_fits(linear / f"{target}_Linear.fit")
         if name == "finish":
             # The finish stage (emission/cluster) writes deliverables at the --out root (one
             # level above _work/<target>); SIRIL's `save` produces .fit, which the stage then

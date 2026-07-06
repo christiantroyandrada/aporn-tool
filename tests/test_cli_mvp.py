@@ -1,12 +1,32 @@
 """End-to-end cmd_mode: preprocess + finish stages combined into one pipeline (Task 3)."""
 from pathlib import Path
+import numpy as np
+from astropy.io import fits
 from aporntool.cli import main
 
 
-def _install_fakes(monkeypatch):
+def _write_fake_fits(path):
+    # Auto-crop (the default) reads real FITS data from the golden anchor at stage run time, so
+    # fakes standing in for SIRIL's anchor save must write valid FITS, not a bare "x" text file.
+    # Full-frame signal (no border) means auto-crop resolves to None (nothing to trim/emit).
+    arr = np.full((3, 10, 10), 0.5, np.float32)
+    fits.writeto(str(path), arr, overwrite=True)
+
+
+def _install_fakes(monkeypatch, tmp_path):
     # Pretend every tool is discoverable, and fake both run_siril (preprocess + finish) and
     # run_graxpert so a full mode run reaches real deliverables without launching real tools.
     monkeypatch.setattr("aporntool.cli.discover_tool", lambda name, **kw: "/usr/bin/" + name)
+
+    # Preflight checks that GraXpert's AI models exist on disk (mosaic/reflection need them).
+    # Point that check at a temp models dir with fake .onnx files so the test is hermetic,
+    # instead of depending on whether this machine happens to have GraXpert models installed.
+    models = tmp_path / "gxmodels"
+    for kind in ("bge", "denoise"):
+        d = models / f"{kind}-ai-models" / "v1"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "model.onnx").write_bytes(b"x")
+    monkeypatch.setattr("aporntool.cli.graxpert_model_root", lambda: models)
 
     import aporntool.stages.preprocess as pp
     import aporntool.stages.finish as fin
@@ -26,7 +46,7 @@ def _install_fakes(monkeypatch):
         linear = Path(workdir) / "02_linear"
         linear.mkdir(parents=True, exist_ok=True)
         target = Path(workdir).name           # workdir == _work/<target>
-        (linear / f"{target}_Linear.fit").write_text("x", encoding="utf-8")
+        _write_fake_fits(linear / f"{target}_Linear.fit")
         if name == "crop":
             # mosaic bge stage: SIRIL crop writes <TARGET>_cropped.fit into 02_linear.
             (linear / f"{target}_cropped.fit").write_text("x", encoding="utf-8")
@@ -64,7 +84,7 @@ def _install_fakes(monkeypatch):
 
 
 def test_emission_run_produces_final_deliverable(tmp_path, monkeypatch):
-    _install_fakes(monkeypatch)
+    _install_fakes(monkeypatch, tmp_path)
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
@@ -74,7 +94,7 @@ def test_emission_run_produces_final_deliverable(tmp_path, monkeypatch):
 
 
 def test_mosaic_run_produces_final_deliverable(tmp_path, monkeypatch):
-    _install_fakes(monkeypatch)
+    _install_fakes(monkeypatch, tmp_path)
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
@@ -84,10 +104,20 @@ def test_mosaic_run_produces_final_deliverable(tmp_path, monkeypatch):
 
 
 def test_spaced_out_path_rejected_with_clear_error(tmp_path, monkeypatch, capsys):
-    _install_fakes(monkeypatch)
+    _install_fakes(monkeypatch, tmp_path)
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out with spaces"
     code = main(["dso-emission-nebula", "--in", str(subs), "--out", str(out), "--target", "M8"])
     assert code == 1
     assert "must not contain spaces" in capsys.readouterr().out
+
+
+def test_crop_and_no_crop_are_mutually_exclusive(tmp_path, capsys):
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    out = tmp_path / "out"
+    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+                 "--target", "M31", "--crop", "0 0 10 10", "--no-crop"])
+    assert code == 1
+    assert "mutually exclusive" in capsys.readouterr().out

@@ -129,6 +129,8 @@ def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subproces
                           scratch_dir=None, params=None):
     # Dual-layer reflection finish: stretch -> StarNet -> process starless (kill green, boost blue,
     # lift midtones, local contrast, DARKEN background) + process stars -> screen-blend -> save.
+    # NOTE: cropping is NOT done here — the bge stage already crops the linear anchor (via SIRIL)
+    # before GraXpert, matching every other mode's crop-before-background-extraction order.
     import tifffile
     from astropy.io import fits
     p = {**REFLECTION_DEFAULTS, **(params or {})}

@@ -47,7 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--from", dest="from_stage", default=None, help="restart at this stage id")
         pm.add_argument("--redo", default=None, help="re-run this stage id and everything downstream")
         pm.add_argument("--force", action="store_true", help="re-run all stages, ignore checkpoints")
-        pm.add_argument("--crop", default=None, help="SIRIL crop box 'X Y W H' (default: no crop)")
+        pm.add_argument("--crop", default=None,
+                        help="explicit SIRIL crop box 'X Y W H' (default: auto-crop)")
+        pm.add_argument("--no-crop", action="store_true",
+                        help="disable auto-crop; use the full frame")
         pm.add_argument("--star-reduce", type=float, default=0.5,
                         help="mosaic star-blend fraction after StarNet removal (default 0.5)")
         pm.add_argument("--profile", default=None, help="color/stretch preset override")
@@ -132,6 +135,10 @@ def cmd_mode(args, mode: str) -> int:
     # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + run the
     # preprocess pipeline through to the golden anchor (finishing stages land in Plan 4).
     cfg = load_config(args.config)
+    if args.crop and args.no_crop:
+        print("ERROR: --crop and --no-crop are mutually exclusive. Pass one, or neither "
+              "for the default auto-crop.")
+        return 1
     in_dirs = [to_input_dir(sanitize_dropped_path(p)) for p in args.inputs]
     for d in in_dirs:
         if not d.is_dir():
@@ -179,9 +186,12 @@ def cmd_mode(args, mode: str) -> int:
     siril = _resolve_tool(cfg, "siril")
     graxpert = _resolve_tool(cfg, "graxpert")
     starnet = _resolve_tool(cfg, "starnet2")
+    # Auto-crop by default (FR-20): trims ragged registration/mosaic borders. An explicit --crop
+    # box always wins; --no-crop disables cropping entirely (use the full frame).
+    crop = args.crop if args.crop else (None if args.no_crop else "auto")
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
-                                  starnet_exe=starnet, crop=args.crop, star_reduce=args.star_reduce)
+                                  starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]
     fp = input_fingerprint(iter_fits(ws.lights))
     # Resume from the on-disk manifest when it still matches (mode/order/fingerprint); else fresh.

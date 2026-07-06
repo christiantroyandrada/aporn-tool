@@ -10,6 +10,7 @@ from aporntool.stages.finish_cmds import (
     mosaic_finish_cmds, emission_finish_cmds, cluster_finish_cmds,
 )
 from aporntool.stages.reflection_finish import run_reflection_finish
+from aporntool.stages.crop import resolve_crop
 
 
 def _nonzero(p) -> bool:
@@ -64,8 +65,11 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         clean = ws.graxpert / f"{ws.target}_clean"
         # bge: crop (SIRIL) then GraXpert BGE on the cropped linear.
         def _bge():
+            # Resolve at RUN time (not build_finish_stages call time) — the anchor .fit only
+            # exists once preprocess stages have actually produced it.
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
             _siril("crop", [f"load {anchor.as_posix()}",
-                            *( [f"crop {crop}"] if crop else [] ),
+                            *( [f"crop {box}"] if box else [] ),
                             f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
             run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
                                  str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
@@ -91,9 +95,11 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
     elif mode in ("dso-emission-nebula", "dso-star-cluster"):
         gen = emission_finish_cmds if mode == "dso-emission-nebula" else cluster_finish_cmds
         def _finish():
+            # Resolve at RUN time — the anchor .fit only exists once preprocess has produced it.
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
             cmds = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
                 cfg.catalog_astro and cfg.catalog_photo) else []
-            cmds += gen(anchor.as_posix(), out_name, box=crop, spcc=spcc)
+            cmds += gen(anchor.as_posix(), out_name, box=box, spcc=spcc)
             _siril("finish", cmds, cd=str(ws.linear))
             # SIRIL's `save` writes .fit; the FR-27 deliverable name is .fits.
             _promote_fit_to_fits(ws)
@@ -105,8 +111,9 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         clean = ws.graxpert / f"{ws.target}_clean"
         # bge: crop (SIRIL) then GraXpert BGE on the cropped linear (same as the mosaic branch).
         def _bge():
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
             _siril("crop", [f"load {anchor.as_posix()}",
-                            *( [f"crop {crop}"] if crop else [] ),
+                            *( [f"crop {box}"] if box else [] ),
                             f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
             run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
                                  str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
@@ -119,7 +126,10 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
 
         def _finish():
             # StarNet2 scratch tifs must not leak into the --out root (FR-4) — keep them under
-            # the target's own _work/05_finish scratch dir.
+            # the target's own _work/05_finish scratch dir. Cropping is NOT repeated here: the bge
+            # stage already cropped the linear anchor before GraXpert, so re-cropping would apply
+            # the crop twice (an explicit --crop box especially would be wrong on the already
+            # -cropped frame). run_reflection_finish therefore takes no crop argument.
             run_reflection_finish(f"{clean}.fits", out_name, starnet_exe=starnet_exe,
                                   runner=runner, scratch_dir=ws.finish)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
