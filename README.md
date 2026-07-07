@@ -4,19 +4,19 @@
 
 [![PyPI](https://img.shields.io/pypi/v/aporn-tool)](https://pypi.org/project/aporn-tool/) [![Python](https://img.shields.io/pypi/pyversions/aporn-tool)](https://pypi.org/project/aporn-tool/)
 
-📦 **Install:** `pip install aporn-tool` — [releases](https://github.com/christiantroyandrada/aporn-tool/releases) · [changelog](CHANGELOG.md).
+📦 **Install:** `pip install aporn-tool` - [releases](https://github.com/christiantroyandrada/aporn-tool/releases) · [changelog](CHANGELOG.md).
 
 aPornTool takes a folder of raw astrophotography subs and drives them through the full
-linear→nonlinear editing pipeline — stacking, photometric colour calibration, gradient and noise
-removal, colour-preserving stretch, and star management — leaving only the deliverables in your
-output folder and every scratch file tucked into a hidden working directory.
+linear-to-nonlinear editing pipeline: stacking, photometric colour calibration, gradient and noise
+removal, colour-preserving stretch, and star management. Only the deliverables land in your output
+folder; scratch files get tucked into a hidden working directory.
 
 It's built for the **ZWO Seestar** workflow (internal calibration → no darks/flats/bias) but works
 with any OSC `.fit` subs, and runs natively on **Windows, macOS (incl. Apple Silicon), and Linux**.
 
-> **Design goal — processing parity:** on the *same* data, aim to match what a skilled processor
+> **Design goal: processing parity.** On the *same* data, aim to match what a skilled processor
 > would get, so the only remaining variable is capture (aperture, integration hours, sky darkness).
-> The tool can't invent detail that isn't in the data — the final crop, curves, and watermark are
+> The tool can't invent detail that isn't in the data. The final crop, curves, and watermark are
 > yours to do from the 16-bit TIFF (Canva/Photoshop).
 
 ---
@@ -27,7 +27,7 @@ with any OSC `.fit` subs, and runs natively on **Windows, macOS (incl. Apple Sil
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [First-time setup](#first-time-setup)
-- [Usage — from simplest to advanced](#usage--from-simplest-to-advanced)
+- [Usage](#usage--from-simplest-to-advanced)
 - [Command reference](#command-reference)
 - [Stages & resume](#stages--resume)
 - [Output layout](#output-layout)
@@ -49,16 +49,16 @@ raw .fit subs ──► stage ──► SIRIL: calibrate ─► register ─► 
 ```
 
 - Each **stage** is checkpointed. The **golden linear stack** (`_work/<target>/02_linear/`) is the
-  immutable re-processing anchor — re-finishing never re-stacks.
-- The pipeline is **parameterised per mode**, not one-size-fits-all: registration, gradient tool,
-  SPCC placement, and star handling differ (see the table below).
+  immutable re-processing anchor. Re-finishing never re-stacks.
+- The pipeline is **parameterised per mode**: registration, gradient tool, SPCC placement, and
+  star handling all differ depending on what you're shooting (see the table below).
 
 | Mode | Best for | Registration | Gradient | Stars |
 |------|----------|--------------|----------|-------|
-| `dso-mosaic` | galaxies & multi-panel — M31, M33, M51, M101, NGC7000 | WCS plate-solve (`framing=max`) | GraXpert BGE | StarNet2, blend some back |
-| `dso-emission-nebula` | Hα HII / SNRs — M8, M20, M42, M16, Veil | star-based 2-pass | SIRIL `subsky` | keep all (rich field) |
-| `dso-reflection-nebula` | blue scattered light — VdB106, M78 | star-based 2-pass | GraXpert BGE | dual-layer screen blend |
-| `dso-star-cluster` | globulars & open clusters — M13, M22, M45, M44 | 2-pass (+FWHM cull) | SIRIL `subsky` | **keep all — stars are the subject** |
+| `dso-mosaic` | galaxies & multi-panel - M31, M33, M51, M101, NGC7000 | WCS plate-solve (`framing=max`) | GraXpert BGE | StarNet2, blend some back |
+| `dso-emission-nebula` | Hα HII / SNRs - M8, M20, M42, M16, Veil | star-based 2-pass | SIRIL `subsky` | keep all (rich field) |
+| `dso-reflection-nebula` | blue scattered light - VdB106, M78 | star-based 2-pass | GraXpert BGE | dual-layer screen blend |
+| `dso-star-cluster` | globulars & open clusters - M13, M22, M45, M44 | 2-pass (+FWHM cull) | SIRIL `subsky` | **keep all, stars are the subject** |
 
 Planetary (video → AutoStakkert → finish) is planned; it requires a manual GUI stacking step.
 
@@ -74,8 +74,8 @@ Planetary (video → AutoStakkert → finish) is planned; it requires a manual G
 | **StarNet2** | star removal | https://www.starnetastro.com/ |
 | **ffmpeg / ffprobe** | planetary + final polish | ffmpeg.org / package manager |
 
-Every DSO tool is natively cross-platform (incl. Apple Silicon). The tool locates each one on
-`PATH`, then in the standard install locations per OS, then from `aporntool.config.json` — you
+Every DSO tool runs natively cross-platform (incl. Apple Silicon). The tool locates each one on
+`PATH`, then in the standard install locations per OS, then from `aporntool.config.json`. You
 never hard-code paths.
 
 <details>
@@ -102,8 +102,8 @@ pip install aporn-tool
 ```
 
 That gives you the `aporn-tool` command. `python -m aporntool` also works as a module fallback
-(the Python module keeps the one-word name — module names can't contain hyphens), and an `aporntool`
-alias command is installed too, so either spelling runs.
+(module names can't contain hyphens, so the Python package keeps the one-word `aporntool` name),
+and an `aporntool` alias command is installed too. Either spelling works.
 
 <details>
 <summary>Or install from source (for development / latest main)</summary>
@@ -118,14 +118,14 @@ python3 -m venv .venv
 
 </details>
 
-> Installing the Python package does **not** install Siril/GraXpert/StarNet — those are separate
+> Installing the Python package does **not** install Siril/GraXpert/StarNet. Those are separate
 > apps (see [Prerequisites](#prerequisites)). Run `aporn-tool config --check` to confirm they're found.
 
 ---
 
 ## First-time setup
 
-Run the discovery check — it prints where each tool was found and writes a starter config:
+Run the discovery check. It prints where each tool was found and writes a starter config:
 
 ```bash
 aporn-tool config --check
@@ -133,15 +133,15 @@ aporn-tool config --check
 
 Then complete the three one-time setup steps (the tool's preflight checks the ones it can):
 
-1. **GraXpert AI models** *(mosaic & reflection)* — open GraXpert once and run **Background
+1. **GraXpert AI models** *(mosaic & reflection)* - open GraXpert once and run **Background
    Extraction** and **Denoise** on any image so it downloads the model files. Preflight verifies
    they exist *before* stacking, so a missing model fails in seconds, not after a 30-minute stack.
-2. **StarNet inside SIRIL** *(mosaic)* — SIRIL's built-in `starnet` command runs the executable set
+2. **StarNet inside SIRIL** *(mosaic)* - SIRIL's built-in `starnet` command runs the executable set
    in **SIRIL → Preferences → External Programs**. Being on `PATH` is **not** enough for mosaic
    mode. (Reflection mode calls the StarNet CLI directly, so it only needs it discoverable.)
-3. **Local Gaia catalogs in SIRIL** *(SPCC colour calibration)* — online VizieR is retired. Install
+3. **Local Gaia catalogs in SIRIL** *(SPCC colour calibration)* - online VizieR is retired. Install
    the sky region matching your target: **Milky Way** for galactic nebulae/low-latitude clusters,
-   **Galaxy Season** for high-latitude galaxies. The wrong region → SPCC reports "no stars".
+   **Galaxy Season** for high-latitude galaxies. Wrong region → SPCC reports "no stars".
 
 Validate everything without processing:
 
@@ -155,7 +155,7 @@ aporn-tool dso-mosaic --in "/path/to/subs" --out /path/to/out --target M31 --pre
 
 ### 1. The simplest run
 
-Point it at a folder of subs and pick the mode — that's all. The object name and coordinates are
+Point it at a folder of subs and pick the mode, that's all. The object name and coordinates are
 read from the subs' FITS header, and the results land in a folder named after the target, right
 beside your subs:
 
@@ -163,7 +163,7 @@ beside your subs:
 aporn-tool dso-mosaic --in "/path/to/M31 subs"
 ```
 
-Produces `M31_final.tif` (16-bit — the real deliverable), `.png`, `.jpg` (quick-look), and `.fits`
+Produces `M31_final.tif` (16-bit, the real deliverable), `.png`, `.jpg` (quick-look), and `.fits`
 next to the input; everything else lives under `_work/`.
 
 Override either default when you want to: `--target` for a custom name, `--out` for a custom
@@ -194,7 +194,7 @@ aporn-tool dso-mosaic \
 
 ### 4. A target not in the built-in catalog
 
-Nothing special needed — the coordinates come from your subs' FITS header, so unlisted targets
+Nothing special needed. The coordinates come from your subs' FITS header, so unlisted targets
 (VdB 106, Sh2-155, …) just work. Pass `--target` only when you want a custom output name:
 
 ```bash
@@ -216,7 +216,7 @@ aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --crop "162 
 
 ### 6. Check status and resume
 
-Re-running the **same command auto-resumes** at the first unfinished stage — nothing done is
+Re-running the **same command auto-resumes** at the first unfinished stage, nothing done is
 repeated. Inspect the ledger any time:
 
 ```bash
@@ -260,10 +260,10 @@ aporn-tool dso-mosaic \
   --redo spcc
 ```
 
-- `--star-reduce 0.35` — after StarNet removes stars (mosaic), blend 35% of them back (lower =
+- `--star-reduce 0.35` - after StarNet removes stars (mosaic), blend 35% of them back (lower =
   fewer/dimmer stars; default 0.5).
-- `--config` — use a specific config file (tool paths, catalogs, Seestar defaults).
-- `--redo spcc` — recompute from the `spcc` stage onward, reusing the stack.
+- `--config` - use a specific config file (tool paths, catalogs, Seestar defaults).
+- `--redo spcc` - recompute from the `spcc` stage onward, reusing the stack.
 
 ---
 
@@ -284,9 +284,9 @@ aporn-tool <command> [options]
 
 | Option | Description |
 |--------|-------------|
-| `--in PATH` | subs folder — **required**, repeatable for multi-night |
-| `--out PATH` | output root — optional; defaults to a `<TARGET>` folder beside the subs; must be space-free |
-| `--target NAME` | object name — optional; auto-detected from the subs' FITS `OBJECT` header |
+| `--in PATH` | subs folder (**required**, repeatable for multi-night) |
+| `--out PATH` | output root (optional; defaults to a `<TARGET>` folder beside the subs; must be space-free) |
+| `--target NAME` | object name (optional; auto-detected from the subs' FITS `OBJECT` header) |
 | `--crop "X Y W H"` | explicit SIRIL crop box (default: auto-crop) |
 | `--no-crop` | disable auto-crop; keep the full frame |
 | `--star-reduce F` | mosaic star blend-back fraction (default 0.5) |
@@ -305,7 +305,7 @@ FITS header automatically.
 
 ## Stages & resume
 
-Stage names are **per-mode** — run `aporn-tool status` to see yours. Current orders:
+Stage names are **per-mode**. Run `aporn-tool status` to see yours. Current orders:
 
 | Mode | Stages (what `--from` / `--redo` accept) |
 |------|------------------------------------------|
@@ -315,7 +315,7 @@ Stage names are **per-mode** — run `aporn-tool status` to see yours. Current o
 | `dso-star-cluster` | `calibrate → register → stack → mirrorx → finish` |
 
 A stage is only marked `done` after its output is verified (exists, non-empty, right type). A
-crash or a raising stage is marked `failed` and reported with the log tail — re-run to resume.
+crash or a raising stage is marked `failed` and reported with the log tail. Re-run to resume.
 Changing a parameter re-runs that stage and everything downstream, nothing upstream.
 
 ---
@@ -339,7 +339,7 @@ Changing a parameter re-runs that stage and everything downstream, nothing upstr
       └─ aporntool.json      run manifest / resume state
 ```
 
-Multiple targets can share one `--out` — each gets its own `_work/<target>/` and deliverables at
+Multiple targets can share one `--out`; each gets its own `_work/<target>/` and deliverables at
 the root.
 
 ---
@@ -370,7 +370,7 @@ Resolution order for each tool: **explicit config path → `PATH` → known inst
 
 ## FAQ
 
-**Do I need darks/flats/bias?** No — the Seestar calibrates internally. For other rigs, calibrate
+**Do I need darks/flats/bias?** No. The Seestar calibrates internally. For other rigs, calibrate
 your subs beforehand (the tool ingests already-calibrated `.fit`).
 
 **How many subs do I need?** More integration is the biggest quality lever. Combine nights with
@@ -379,7 +379,7 @@ repeated `--in`. There's no hard minimum, but a handful of subs won't stack mean
 **Will it delete my raw data?** No. Subs are hardlinked into `_work/00_lights/`; the golden linear
 stack and your originals are never overwritten.
 
-**Can I re-process without re-stacking?** Yes — that's the point of the golden anchor. Tweak a
+**Can I re-process without re-stacking?** Yes, that's the point of the golden anchor. Tweak a
 finishing parameter and re-run; only `finish` (or the changed stage onward) recomputes.
 
 **It didn't crop the mosaic tightly.** Auto-crop trims the black/near-empty borders, but it
@@ -388,7 +388,7 @@ on mosaics** (those edge pixels are normalized to near the sky level). Pass an e
 `--crop "X Y W H"`, or do the final crop by hand in Canva/Photoshop. Tighter mosaic cropping is on
 the roadmap.
 
-**Which mode for the Pleiades (M45)?** It's an open cluster in blue reflection nebulosity — use
+**Which mode for the Pleiades (M45)?** It's an open cluster in blue reflection nebulosity, so use
 `dso-reflection-nebula`, not the plain cluster finish.
 
 **Does it need a GPU?** No. GraXpert uses the GPU when available and falls back to CPU.
@@ -405,9 +405,9 @@ the roadmap.
 | `--out path must not contain spaces` | Choose a space-free output folder (SIRIL limitation). |
 | `golden anchor not found` on `--from`/`--redo` | Run the full pipeline first (drop `--from`/`--redo`) so preprocess produces the anchor. |
 | Plate-solving fails on a mosaic | Ensure SIRIL's astrometry catalog is installed; the tool verifies solves by frame count, not exit code. |
-| Noisy/ragged band left after auto-crop | Known mosaic limitation (brightness-based crop misses low-coverage edges) — pass `--crop "X Y W H"`, or crop in post. |
+| Noisy/ragged band left after auto-crop | Known mosaic limitation (brightness-based crop misses low-coverage edges). Pass `--crop "X Y W H"`, or crop in post. |
 
-Every stage saves its SIRIL script and stdout under `_work/<target>/logs/` — check `<stage>.log`
+Every stage saves its SIRIL script and stdout under `_work/<target>/logs/`. Check `<stage>.log`
 for the exact tool error.
 
 ---
@@ -416,10 +416,10 @@ for the exact tool error.
 
 - **Deconvolution / wavelets are skipped** for undersampled Seestar data (they amplify noise
   without adding real detail).
-- **The last 5%** — final crop, curves, watermark — is done by hand from the 16-bit TIFF.
+- **The last 5%** (final crop, curves, watermark) is done by hand from the 16-bit TIFF.
 - **Planetary** needs a manual AutoStakkert stacking step (no usable CLI) and is not yet shipped.
 - **Auto-crop** trims black borders but can leave a noisy low-coverage band on mosaics (it crops by
-  brightness, not coverage) — tighten with `--crop` or in post; a coverage-aware crop is planned.
+  brightness, not coverage). Tighten with `--crop` or in post; a coverage-aware crop is planned.
 
 ---
 
