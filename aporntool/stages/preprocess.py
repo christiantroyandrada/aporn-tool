@@ -3,8 +3,9 @@ from pathlib import Path
 
 from aporntool.stages.engine import Stage
 from aporntool.tools.siril import (
-    build_ssf, write_ssf, run_siril, gaia_catalog_cmds, platesolve_cmd, spcc_cmd,
+    build_ssf, write_ssf, run_siril, gaia_catalog_cmds, platesolve_cmd, spcc_cmd, _g,
 )
+from aporntool.config import StackParams
 
 _SINGLE_PANEL = {"dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"}
 _SPCC_IN_PREPROCESS = {"dso-mosaic", "dso-reflection-nebula"}   # others SPCC in the finish phase
@@ -30,24 +31,26 @@ def convert_and_calibrate_cmds() -> list:
     ]
 
 
-def register_cmds(mode: str) -> list:
+def register_cmds(mode: str, stack=None) -> list:
+    sp = stack or StackParams()
     if mode == "dso-mosaic":
         # WCS-based assembly: plate-solve every frame, then reproject to a common max frame.
         return ["seqplatesolve pp_light -force -nocache",
-                "seqapplyreg pp_light -filter-round=2.5k -framing=max"]
+                f"seqapplyreg pp_light -filter-round={sp.filter_round} -framing=max"]
     if mode == "dso-star-cluster":
         # Tight round stars are the payoff → also cull the worst FWHM (authored -wfwhm=2.5k).
         return ["register pp_light -2pass",
-                "seqapplyreg pp_light -filter-round=2.5k -filter-wfwhm=2.5k"]
+                f"seqapplyreg pp_light -filter-round={sp.filter_round} -filter-wfwhm={sp.filter_wfwhm}"]
     # emission / reflection: star-based 2-pass registration.
     return ["register pp_light -2pass",
-            "seqapplyreg pp_light -filter-round=2.5k"]
+            f"seqapplyreg pp_light -filter-round={sp.filter_round}"]
 
 
-def stack_cmds(mode: str) -> list:
-    # Sigma-clip stack. feather=100 is MANDATORY for mosaics or panel seams are permanent (#1).
-    feather = " -feather=100" if mode == "dso-mosaic" else ""
-    return [f"stack r_pp_light rej 3 3 -norm=addscale -output_norm -rgb_equal{feather} -out=result"]
+def stack_cmds(mode: str, stack=None) -> list:
+    # Sigma-clip stack. feather is MANDATORY for mosaics or panel seams are permanent (#1).
+    sp = stack or StackParams()
+    feather = f" -feather={_g(sp.feather_mosaic)}" if mode == "dso-mosaic" else ""
+    return [f"stack r_pp_light rej {_g(sp.sigma_low)} {_g(sp.sigma_high)} -norm=addscale -output_norm -rgb_equal{feather} -out=result"]
 
 
 def mirrorx_cmds() -> list:
@@ -92,13 +95,13 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
         # in separate SIRIL processes within a single stage.
         def _register_mosaic():
             _run("platesolve", ["seqplatesolve pp_light -force -nocache"], cd=str(proc))
-            _run("applyreg", ["seqapplyreg pp_light -filter-round=2.5k -framing=max"], cd=str(proc))
+            _run("applyreg", [f"seqapplyreg pp_light -filter-round={cfg.pipeline.stack.filter_round} -framing=max"], cd=str(proc))
         stages.append(Stage("register", _register_mosaic,
                             lambda: (proc / "r_pp_light_.seq").exists()))
     else:
         stages.append(Stage(
             "register",
-            lambda: _run("register", register_cmds(mode), cd=str(proc)),
+            lambda: _run("register", register_cmds(mode, cfg.pipeline.stack), cd=str(proc)),
             lambda: (proc / "r_pp_light_.seq").exists()))
 
     anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
@@ -106,7 +109,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
     # stack: sigma-clip the registered sequence → result.fit (linear). No mirror/anchor here.
     stages.append(Stage(
         "stack",
-        lambda: _run("stack", stack_cmds(mode), cd=str(proc)),
+        lambda: _run("stack", stack_cmds(mode, cfg.pipeline.stack), cd=str(proc)),
         lambda: (proc / "result.fit").exists()))
 
     if is_single_panel(mode) and not spcc_in_preprocess(mode):
@@ -130,7 +133,8 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                 "load result",
                 platesolve_cmd(coords=f"{target.ra},{target.dec}",
                                focal=cfg.seestar_focal_mm, pixel=cfg.seestar_pixel_um),
-                spcc_cmd(),
+                spcc_cmd(sensor=cfg.pipeline.spcc.sensor, osc_filter=cfg.pipeline.spcc.osc_filter,
+                         whiteref=cfg.pipeline.spcc.whiteref, catalog=cfg.pipeline.spcc.catalog),
             ]
             if is_single_panel(mode):
                 cmds.append("mirrorx")

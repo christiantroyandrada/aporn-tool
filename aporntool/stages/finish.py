@@ -1,6 +1,7 @@
 """Assemble per-mode finish stages: golden anchor → deliverables at the --out root."""
 import shutil
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
 
 from aporntool.stages.engine import Stage
@@ -45,7 +46,7 @@ def _promote_fit_to_fits(ws) -> None:
 
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
-                        starnet_exe=None, crop=None, star_reduce=0.5, runner=None):
+                        starnet_exe=None, crop=None, star_reduce=None, runner=None):
     runner = runner or subprocess.run
     anchor = ws.linear / f"{ws.target}_Linear"          # SIRIL load name (no .fit)
     out_name = str((ws.out_root / f"{ws.target}_final").as_posix())
@@ -67,17 +68,20 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         def _bge():
             # Resolve at RUN time (not build_finish_stages call time) — the anchor .fit only
             # exists once preprocess stages have actually produced it.
-            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             _siril("crop", [f"load {anchor.as_posix()}",
                             *( [f"crop {box}"] if box else [] ),
                             f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
             run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
-                                 str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
+                                 str(bge_out), gpu=True, smoothing=cfg.pipeline.graxpert.bge_smoothing,
+                                 correction=cfg.pipeline.graxpert.bge_correction),
+                         bge_out, runner=runner, settle=3.0)
         stages.append(Stage("bge", _bge, lambda: _nonzero(f"{bge_out}.fits")))
 
         def _denoise():
             run_graxpert(denoise_cmd(graxpert_exe, f"{bge_out}.fits", str(clean),
-                                     gpu=True, strength=0.8), clean, runner=runner, settle=3.0)
+                                     gpu=True, strength=cfg.pipeline.graxpert.denoise_strength),
+                         clean, runner=runner, settle=3.0)
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
@@ -87,19 +91,23 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             # mosaic_finish_cmds stays bare. Then copy the real deliverables out to --out root.
             bare_out = f"{ws.target}_final"
             rel_clean = f"../03_graxpert/{ws.target}_clean"
-            _siril("finish", mosaic_finish_cmds(rel_clean, bare_out,
-                                                star_reduce=star_reduce), cd=str(ws.finish))
+            _siril("finish", mosaic_finish_cmds(rel_clean, bare_out, star_reduce=star_reduce,
+                                                params=cfg.pipeline.mosaic_finish,
+                                                jpeg_quality=cfg.pipeline.jpeg_quality), cd=str(ws.finish))
             _publish(ws.finish, ws)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     elif mode in ("dso-emission-nebula", "dso-star-cluster"):
         gen = emission_finish_cmds if mode == "dso-emission-nebula" else cluster_finish_cmds
+        fparams = (cfg.pipeline.emission_finish if mode == "dso-emission-nebula"
+                   else cfg.pipeline.cluster_finish)
         def _finish():
             # Resolve at RUN time — the anchor .fit only exists once preprocess has produced it.
-            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             cmds = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
                 cfg.catalog_astro and cfg.catalog_photo) else []
-            cmds += gen(anchor.as_posix(), out_name, box=box, spcc=spcc)
+            cmds += gen(anchor.as_posix(), out_name, box=box, spcc=spcc, params=fparams,
+                        catalog=cfg.pipeline.spcc.catalog, jpeg_quality=cfg.pipeline.jpeg_quality)
             _siril("finish", cmds, cd=str(ws.linear))
             # SIRIL's `save` writes .fit; the FR-27 deliverable name is .fits.
             _promote_fit_to_fits(ws)
@@ -111,17 +119,20 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         clean = ws.graxpert / f"{ws.target}_clean"
         # bge: crop (SIRIL) then GraXpert BGE on the cropped linear (same as the mosaic branch).
         def _bge():
-            box = resolve_crop(crop, f"{anchor.as_posix()}.fit")
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             _siril("crop", [f"load {anchor.as_posix()}",
                             *( [f"crop {box}"] if box else [] ),
                             f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
             run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
-                                 str(bge_out), gpu=True), bge_out, runner=runner, settle=3.0)
+                                 str(bge_out), gpu=True, smoothing=cfg.pipeline.graxpert.bge_smoothing,
+                                 correction=cfg.pipeline.graxpert.bge_correction),
+                         bge_out, runner=runner, settle=3.0)
         stages.append(Stage("bge", _bge, lambda: _nonzero(f"{bge_out}.fits")))
 
         def _denoise():
             run_graxpert(denoise_cmd(graxpert_exe, f"{bge_out}.fits", str(clean),
-                                     gpu=True, strength=0.8), clean, runner=runner, settle=3.0)
+                                     gpu=True, strength=cfg.pipeline.graxpert.denoise_strength),
+                         clean, runner=runner, settle=3.0)
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
@@ -131,12 +142,15 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             # the crop twice (an explicit --crop box especially would be wrong on the already
             # -cropped frame). run_reflection_finish therefore takes no crop argument.
             run_reflection_finish(f"{clean}.fits", out_name, starnet_exe=starnet_exe,
-                                  runner=runner, scratch_dir=ws.finish)
+                                  runner=runner, scratch_dir=ws.finish,
+                                  params=asdict(cfg.pipeline.reflection_finish),
+                                  jpeg_quality=cfg.pipeline.jpeg_quality)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     return stages
 
 
 def _spcc_string(cfg) -> str:
-    # Whole-token-quoted SPCC (gotcha #3); whiteref/region resolution is a later enhancement.
-    return spcc_cmd()
+    # Whole-token-quoted SPCC (gotcha #3), built from the configured SpccParams.
+    sp = cfg.pipeline.spcc
+    return spcc_cmd(sensor=sp.sensor, osc_filter=sp.osc_filter, whiteref=sp.whiteref, catalog=sp.catalog)

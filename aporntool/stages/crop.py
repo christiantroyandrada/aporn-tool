@@ -34,7 +34,7 @@ def _largest_true_rectangle(mask):
     return best
 
 
-def auto_crop_box(fits_path, *, bg_frac=0.25, margin_frac=0.02):
+def auto_crop_box(fits_path, *, bg_frac=0.25, margin_frac=0.02, target_blocks=_TARGET_BLOCKS):
     # Find the largest rectangle that holds ONLY real signal and return it as a SIRIL "x y w h"
     # crop string, or None if the frame is already full (nothing worth trimming).
     #
@@ -72,7 +72,8 @@ def auto_crop_box(fits_path, *, bg_frac=0.25, margin_frac=0.02):
     # can never contain a border/black pixel. Pad with False to a whole number of blocks so no edge
     # rows/cols go unscanned (a partial edge block holds padding -> not all-True -> excluded, which
     # is the safe direction: it may leave a few signal px near the edge, never includes black).
-    block = max(1, max(H, W) // _TARGET_BLOCKS)
+    tb = max(1, int(target_blocks))            # guard: 0/negative would divide-by-zero / invert
+    block = max(1, max(H, W) // tb)
     if block > 1:
         hb, wb = -(-H // block), -(-W // block)      # ceil division
         padded = np.zeros((hb * block, wb * block), dtype=bool)
@@ -104,8 +105,9 @@ def auto_crop_box(fits_path, *, bg_frac=0.25, margin_frac=0.02):
     return f"{x} {y_siril} {w} {h}"
 
 
-def resolve_crop(crop, fits_path):
+def resolve_crop(crop, fits_path, params=None):
     # crop is "auto" (compute from the image), an explicit "x y w h" string, or None (skip).
+    # `params` (a config CropParams) supplies bg_frac / margin_frac / target_blocks; None -> defaults.
     if crop == "auto":
         # Auto-crop reads the golden anchor at stage run time. If it's absent (e.g. resuming a
         # finish/bge stage with --from/--redo before preprocess has produced it), fail with an
@@ -116,5 +118,8 @@ def resolve_crop(crop, fits_path):
                 f"golden anchor not found: {fits_path}. Auto-crop needs it. Run the full pipeline "
                 f"first (drop --from/--redo so preprocess produces the anchor), then resume; or "
                 f"pass an explicit --crop \"X Y W H\" box.")
+        if params is not None:
+            return auto_crop_box(fits_path, bg_frac=params.bg_frac,
+                                 margin_frac=params.margin_frac, target_blocks=params.target_blocks)
         return auto_crop_box(fits_path)
     return crop or None

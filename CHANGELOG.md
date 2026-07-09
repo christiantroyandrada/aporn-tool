@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.0 — 2026-07-09
+
+### Added
+- **All pipeline parameters centralized in one config file.** Every tunable knob — stack sigma /
+  feather / registration filters, GraXpert smoothing·correction·denoise-strength, auto-crop
+  thresholds, SPCC sensor·filter·whiteref·catalog, per-mode stretch·GHT·saturation·star-blend, the
+  reflection dual-layer dials, `subsky` degree, `rmgreen`, and deliverable JPEG quality — now lives
+  under a `pipeline` block in `aporntool.config.json`, grouped by stage/mode.
+- **`aporn-tool config --init`** writes a config pre-filled with every default, ready to edit.
+- **Out of the box:** the first mode run auto-writes `aporntool.config.json` (all defaults) next
+  to you so the knobs are there to tweak with no command to run or code to touch — it never
+  overwrites an existing file, and a read-only location just falls back to defaults.
+- Defaults live in code; the file only *overlays*, with guards: no file / deleted / empty / corrupt
+  → built-in defaults (a corrupt file warns and carries on); a partial file overrides only the keys
+  it sets; unknown keys and wrong-typed or non-finite values are ignored. A hand-edited file can't
+  break a run. An explicit CLI flag (e.g. `--star-reduce`) still beats the config.
+
+### Fixed
+- `platesolve` in the emission/cluster finish now honours the configured SPCC catalog (was hardcoded
+  `localgaia` — a split-brain if the catalog was changed).
+- A config `crop.target_blocks: 0` no longer divides-by-zero mid-run (floored to ≥ 1).
+
+With no config file, every emitted SIRIL/GraXpert/StarNet command is **byte-identical to v0.3.3** —
+locked by tests.
+
 ## v0.3.3 — 2026-07-07
 
 - **Docs cleanup.** Tightened the README and changelog prose. No functional changes.

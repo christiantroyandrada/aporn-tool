@@ -227,3 +227,31 @@ def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
     # anchor from the successful preprocess must still be there for resume
     assert (work / "02_linear" / "M31_Linear.fit").exists()
     assert (work / "00_lights").exists()             # NOT cleaned — run did not succeed
+
+
+def test_first_run_creates_config_out_of_the_box(tmp_path, monkeypatch, capsys):
+    # A mode run with no config present writes aporntool.config.json (all defaults) next to the user,
+    # so they can see and tweak every knob without touching code. (conftest chdirs CWD to tmp_path.)
+    import json
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    cfg = tmp_path / "aporntool.config.json"
+    assert not cfg.exists()
+    assert main(["dso-emission-nebula", "--in", str(subs), "--out", str(tmp_path / "o"),
+                 "--target", "M8"]) == 0
+    assert cfg.exists()
+    assert json.load(open(cfg))["pipeline"]["mosaic_finish"]["ght_d"] == 0.8
+    assert "pipeline" in capsys.readouterr().out.lower()
+
+
+def test_existing_config_is_not_overwritten(tmp_path, monkeypatch):
+    import json
+    _install_fakes(monkeypatch, tmp_path)
+    subs = tmp_path / "subs"; subs.mkdir()
+    (subs / "Light_0001.fit").write_bytes(b"x")
+    cfg = tmp_path / "aporntool.config.json"
+    cfg.write_text(json.dumps({"pipeline": {"mosaic_finish": {"ght_d": 1.23}}}), encoding="utf-8")
+    assert main(["dso-emission-nebula", "--in", str(subs), "--out", str(tmp_path / "o"),
+                 "--target", "M8"]) == 0
+    assert json.load(open(cfg))["pipeline"]["mosaic_finish"]["ght_d"] == 1.23

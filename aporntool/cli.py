@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cfg = sub.add_parser("config", help="inspect/verify tool configuration")
     p_cfg.add_argument("--check", action="store_true", help="verify all tools are discoverable")
+    p_cfg.add_argument("--init", action="store_true",
+                       help="write a config file pre-filled with every pipeline default to edit")
     p_cfg.add_argument("--config", default="aporntool.config.json")
 
     p_status = sub.add_parser("status", help="show the resume ledger for a target")
@@ -52,8 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="explicit SIRIL crop box 'X Y W H' (default: auto-crop)")
         pm.add_argument("--no-crop", action="store_true",
                         help="disable auto-crop; use the full frame")
-        pm.add_argument("--star-reduce", type=float, default=0.5,
-                        help="mosaic star-blend fraction after StarNet removal (default 0.5)")
+        pm.add_argument("--star-reduce", type=float, default=None,
+                        help="mosaic star-blend fraction after StarNet removal "
+                             "(overrides config; default from config is 0.5)")
         pm.add_argument("--profile", default=None, help="color/stretch preset override")
         pm.add_argument("--clean", action="store_true",
                         help="on success, delete working files except the golden anchor "
@@ -100,6 +103,14 @@ def _resolve_tool(cfg: Config, tool: str):
 
 def cmd_config(args) -> int:
     cfg = load_config(args.config)
+    if getattr(args, "init", False):
+        # Materialise the full config (preserving any values already set) so every pipeline knob is
+        # visible to edit. Unset keys keep their built-in default; deleting the file restores all.
+        save_config(cfg, args.config)
+        print(f"Wrote config with all pipeline defaults to {args.config}")
+        print("  Edit any value under \"pipeline\" to override just that knob; unset keys keep the")
+        print("  built-in default, and deleting the file restores every default.")
+        return 0
     print("Tool discovery:")
     ok = True
     for tool in ALL_TOOLS:
@@ -110,7 +121,7 @@ def cmd_config(args) -> int:
         else:
             ok = False
     save_config(cfg, args.config)          # write a starter config the user can edit
-    print(f"\nConfig written to {args.config}")
+    print(f"\nConfig written to {args.config} (includes an editable 'pipeline' defaults block).")
     return 0 if ok else 2
 
 
@@ -126,6 +137,21 @@ def cmd_status(args) -> int:
     nxt = m.next_pending()
     print(f"\nResume at: {nxt or 'complete'}")
     return 0
+
+
+def _ensure_config_file(cfg, path) -> None:
+    # Out of the box: on the first valid run, drop a fully-populated config next to the user so every
+    # knob is visible to tweak — no command to run, no code to edit. Never overwrites an existing
+    # file; a read-only location just means the run proceeds on defaults (no crash).
+    p = Path(path)
+    if p.exists():
+        return
+    try:
+        save_config(cfg, path)
+        print(f'Wrote {path} with all default settings — edit any value under "pipeline" to tune '
+              f"the look (or delete it to restore defaults).")
+    except OSError:
+        pass
 
 
 def cmd_mode(args, mode: str) -> int:
@@ -156,6 +182,8 @@ def cmd_mode(args, mode: str) -> int:
         print("ERROR: --out path must not contain spaces (SIRIL path limitation). "
               "Choose a space-free output folder. (Full spaced-path support is planned.)")
         return 1
+
+    _ensure_config_file(cfg, args.config)   # materialise the editable config on first run
 
     # Preflight is environment validation — run it before any staging/compute (FR-PF1).
     tool_paths = {t: _resolve_tool(cfg, t) for t in MODE_TOOLS.get(mode, [])}

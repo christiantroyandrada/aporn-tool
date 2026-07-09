@@ -62,3 +62,14 @@ def test_unknown_target_without_coords_errors_cleanly(capsys, tmp_path, monkeypa
                  "--out", str(tmp_path / "out"), "--target", "NGC9999"])
     assert code == 1
     assert "ERROR" in capsys.readouterr().out       # clean message, not a traceback
+
+
+def test_config_init_writes_full_defaults(tmp_path):
+    import json
+    cfg = tmp_path / "c.json"
+    code = main(["config", "--init", "--config", str(cfg)])
+    assert code == 0 and cfg.exists()
+    data = json.load(open(cfg))
+    assert "pipeline" in data and "mosaic_finish" in data["pipeline"]
+    assert data["pipeline"]["jpeg_quality"] == 95
+    assert data["pipeline"]["mosaic_finish"]["ght_d"] == 0.8

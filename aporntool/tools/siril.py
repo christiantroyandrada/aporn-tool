@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _g(v) -> str:
+    # Format a number for a SIRIL command: integer-valued floats render without ".0" (3.0 -> "3",
+    # keeping `rej 3 3` / `-B=3` byte-identical) while 0.85 stays "0.85".
+    return f"{v:g}"
+
+
 def build_ssf(commands, *, requires: str = "1.3.6", cd: str | None = None) -> str:
     # Every SIRIL script must declare a version floor first; then an optional working dir,
     # then the commands, one per line.

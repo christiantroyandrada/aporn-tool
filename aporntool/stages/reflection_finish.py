@@ -51,7 +51,7 @@ def screen_blend(a, b):
     return np.clip(1 - (1 - np.asarray(a, np.float64)) * (1 - np.asarray(b, np.float64)), 0, 1)
 
 
-def save_deliverables(rgb01, out_stem):
+def save_deliverables(rgb01, out_stem, jpeg_quality=95):
     # Write the four FR-27 deliverables sharing one base name: .fits/.tif(16-bit)/.png/.jpg.
     from PIL import Image
     import tifffile
@@ -62,7 +62,7 @@ def save_deliverables(rgb01, out_stem):
     a = np.clip(np.asarray(rgb01, np.float64), 0, 1)
     a8 = (a * 255 + 0.5).astype(np.uint8)
     Image.fromarray(a8).save(str(out) + ".png")
-    Image.fromarray(a8).save(str(out) + ".jpg", quality=95)
+    Image.fromarray(a8).save(str(out) + ".jpg", quality=int(jpeg_quality))
     tifffile.imwrite(str(out) + ".tif", (a * 65535 + 0.5).astype(np.uint16), photometric="rgb")
     fits.writeto(str(out) + ".fits", np.moveaxis(a.astype(np.float32), -1, 0), overwrite=True)  # FITS = [C,H,W]
     return Path(str(out) + ".tif")
@@ -132,14 +132,14 @@ def process_stars(stars, brightness, saturation):
     return np.clip(st + bloom, 0, 1)
 
 
-REFLECTION_DEFAULTS = dict(target_bg=0.35, sat_r=0.30, sat_g=1.3, sat_b=4.5,
+REFLECTION_DEFAULTS = dict(target_bg=0.35, shadows_clip=-2.8, sat_r=0.30, sat_g=1.3, sat_b=4.5,
                            midboost=0.55, lc=1.3, bgpull=0.08, gamma=0.85,
                            bg_desat=0.14, bg_desat_soft=0.14,
                            st_bright=1.5, st_sat=1.2)
 
 
 def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run,
-                          scratch_dir=None, params=None):
+                          scratch_dir=None, params=None, jpeg_quality=95):
     # Dual-layer reflection finish: stretch -> StarNet -> process starless (kill green, boost blue,
     # lift midtones, local contrast, DARKEN background) + process stars -> screen-blend -> save.
     # NOTE: cropping is NOT done here — the bge stage already crops the linear anchor (via SIRIL)
@@ -151,7 +151,8 @@ def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subproces
     img = np.moveaxis(d, 0, -1) if d.ndim == 3 else np.stack([d] * 3, -1)
     img = np.clip(img, 0, None)
     mx = np.percentile(img, 99.995) or 1.0
-    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=p["target_bg"])
+    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=p["target_bg"],
+                            shadows_clip=p["shadows_clip"])
     work = Path(scratch_dir) if scratch_dir else Path(out_stem).parent
     work.mkdir(parents=True, exist_ok=True)
     tin, tout = work / "_sn_in.tif", work / "_sn_out.tif"
@@ -168,5 +169,5 @@ def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subproces
     sl = desaturate_background(sl, p["bg_desat"], p["bg_desat_soft"])
     st = process_stars(stars, p["st_bright"], p["st_sat"])
     combined = screen_blend(sl, st)
-    save_deliverables(combined, out_stem)
+    save_deliverables(combined, out_stem, jpeg_quality)
     return Path(str(out_stem) + ".tif")

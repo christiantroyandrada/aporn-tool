@@ -4,11 +4,11 @@ import time
 from pathlib import Path
 
 
-def bge_cmd(exe, in_path, out_path, *, gpu=True, smoothing=0.0) -> list:
-    # Background extraction, Subtraction mode (the proven setting).
+def bge_cmd(exe, in_path, out_path, *, gpu=True, smoothing=0.0, correction="Subtraction") -> list:
+    # Background extraction; Subtraction is the proven default (Division is the alternative).
     return [str(exe), "-cli", "-cmd", "background-extraction",
             "-gpu", "true" if gpu else "false",
-            "-smoothing", str(smoothing), "-correction", "Subtraction",
+            "-smoothing", str(smoothing), "-correction", str(correction),
             "-output", str(out_path), str(in_path)]
 
 

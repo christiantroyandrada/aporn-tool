@@ -346,25 +346,52 @@ the root.
 
 ## Configuration file
 
-`aporn-tool config --check` writes `aporntool.config.json`. Edit it to pin tool paths or set the
-local Gaia catalogs:
+Every tunable parameter lives in one file, `aporntool.config.json` — tool paths, Seestar optics,
+local Gaia catalogs, and a **`pipeline`** block with every processing knob grouped by stage/mode.
+**The file is optional and appears out of the box:** the first run writes it (all defaults) next to
+you, editing a value overrides just that knob, and deleting the file restores every default. You can
+also write it on demand:
+
+```bash
+aporn-tool config --init      # write the file pre-filled with ALL defaults, ready to edit
+aporn-tool config --check     # same, and verify Siril/GraXpert/StarNet are discoverable
+```
 
 ```json
 {
-  "tool_paths": {
-    "siril": "/Applications/Siril.app/Contents/MacOS/siril-cli",
-    "graxpert": "/Applications/GraXpert.app/Contents/MacOS/GraXpert",
-    "starnet2": "/usr/local/bin/starnet2",
-    "ffmpeg": "/opt/homebrew/bin/ffmpeg"
-  },
+  "tool_paths": { "siril": "…", "graxpert": "…", "starnet2": "…", "ffmpeg": "…" },
   "seestar_focal_mm": 150.0,
   "seestar_pixel_um": 2.9,
   "catalog_astro": null,
-  "catalog_photo": null
+  "catalog_photo": null,
+  "pipeline": {
+    "stack":    { "sigma_low": 3.0, "sigma_high": 3.0, "feather_mosaic": 100, "filter_round": "2.5k", "filter_wfwhm": "2.5k" },
+    "graxpert": { "bge_smoothing": 0.0, "bge_correction": "Subtraction", "denoise_strength": 0.8 },
+    "crop":     { "bg_frac": 0.25, "margin_frac": 0.02, "target_blocks": 700 },
+    "spcc":     { "sensor": "Sony IMX662", "osc_filter": "UV/IR Block", "whiteref": "Average Spiral Galaxy", "catalog": "localgaia" },
+    "mosaic_finish":     { "autostretch_clip": -2.8, "autostretch_bg": 0.15, "ght_d": 0.8, "ght_b": 3.0, "ght_sp": 0.15, "ght_hp": 0.85, "rmgreen": 1.0, "satu": 0.7, "star_reduce": 0.5 },
+    "emission_finish":   { "subsky_degree": 1, "satu": 0.7, "satu_bg": 0.1 },
+    "cluster_finish":    { "subsky_degree": 1, "denoise_mod": 0.5, "ght_d": 0.7, "ght_b": 3.0, "ght_hp": 0.9, "satu": 0.6, "satu_bg": 0.1 },
+    "reflection_finish": { "target_bg": 0.35, "shadows_clip": -2.8, "sat_r": 0.30, "sat_g": 1.3, "sat_b": 4.5, "midboost": 0.55, "lc": 1.3, "bgpull": 0.08, "gamma": 0.85, "bg_desat": 0.14, "bg_desat_soft": 0.14, "st_bright": 1.5, "st_sat": 1.2 },
+    "jpeg_quality": 95
+  }
 }
 ```
 
-Resolution order for each tool: **explicit config path → `PATH` → known install locations.**
+**Guards (a hand-edited file can't break a run):** no file / deleted / empty / corrupt → all
+built-in defaults (a corrupt file just warns and falls back). A partial file overrides only the keys
+it sets; missing keys, unknown keys, and wrong-typed or non-finite values are ignored and keep their
+default. Change a value and re-run: only the affected stage recomputes (a stretch tweak → just
+`finish`; a `stack`/`crop` change → from that stage), reusing the golden linear stack.
+
+**Precedence:** an explicit CLI flag beats the config — e.g. `--star-reduce 0.3` overrides
+`pipeline.mosaic_finish.star_reduce`. Tool-path resolution: explicit config path → `PATH` →
+known install locations.
+
+**Scope:** `pipeline` holds the tunable *look* dials. Rig optics (`seestar_focal_mm` / `pixel_um`)
+stay top-level (they describe the scope, not the processing), and a few deep reflection-algorithm
+internals (white-point percentile, bloom kernels) remain structural constants — ask if you want
+any of those exposed too.
 
 ---
 
