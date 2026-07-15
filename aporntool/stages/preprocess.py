@@ -7,18 +7,20 @@ from aporntool.tools.siril import (
 )
 from aporntool.config import StackParams
 
-_SINGLE_PANEL = {"dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"}
-_SPCC_IN_PREPROCESS = {"dso-mosaic", "dso-reflection-nebula"}   # others SPCC in the finish phase
-
-
-def is_single_panel(mode: str) -> bool:
-    # Mosaic assembles via WCS (no flip); single-panel modes need mirrorx.
-    return mode in _SINGLE_PANEL
+# Which target TYPES colour-calibrate (SPCC) before the golden anchor. Galaxies and reflection
+# nebulae do it in preprocess; emission and star-cluster do it later, in the finish phase.
+_SPCC_IN_PREPROCESS = {"dso-galaxy", "dso-reflection-nebula"}
 
 
 def spcc_in_preprocess(mode: str) -> bool:
-    # Mosaic/reflection color-calibrate before the golden anchor; emission/cluster do it in finish.
+    # Galaxy/reflection color-calibrate before the golden anchor; emission/cluster do it in finish.
     return mode in _SPCC_IN_PREPROCESS
+
+
+def needs_mirrorx(is_mosaic: bool) -> bool:
+    # Single-panel captures inherit the Seestar's vertical flip and must be mirrored; a mosaic gets
+    # its orientation from WCS reprojection during assembly, so it must NOT be flipped.
+    return not is_mosaic
 
 
 def convert_and_calibrate_cmds() -> list:
@@ -31,9 +33,11 @@ def convert_and_calibrate_cmds() -> list:
     ]
 
 
-def register_cmds(mode: str, stack=None) -> list:
+def register_cmds(mode: str, is_mosaic: bool, stack=None) -> list:
+    # Registration depends on the ASSEMBLY (mosaic vs single), not the target type — except that
+    # star clusters also cull the worst FWHM (tight round stars are the whole point there).
     sp = stack or StackParams()
-    if mode == "dso-mosaic":
+    if is_mosaic:
         # WCS-based assembly: plate-solve every frame, then reproject to a common max frame.
         return ["seqplatesolve pp_light -force -nocache",
                 f"seqapplyreg pp_light -filter-round={sp.filter_round} -framing=max"]
@@ -41,21 +45,17 @@ def register_cmds(mode: str, stack=None) -> list:
         # Tight round stars are the payoff → also cull the worst FWHM (authored -wfwhm=2.5k).
         return ["register pp_light -2pass",
                 f"seqapplyreg pp_light -filter-round={sp.filter_round} -filter-wfwhm={sp.filter_wfwhm}"]
-    # emission / reflection: star-based 2-pass registration.
+    # single-panel galaxy / emission / reflection: star-based 2-pass registration.
     return ["register pp_light -2pass",
             f"seqapplyreg pp_light -filter-round={sp.filter_round}"]
 
 
-def stack_cmds(mode: str, stack=None) -> list:
-    # Sigma-clip stack. feather is MANDATORY for mosaics or panel seams are permanent (#1).
+def stack_cmds(is_mosaic: bool, stack=None) -> list:
+    # Sigma-clip stack. feather is MANDATORY for mosaics or panel seams are permanent (#1); a
+    # single-panel stack has no seams to blend, so no feather.
     sp = stack or StackParams()
-    feather = f" -feather={_g(sp.feather_mosaic)}" if mode == "dso-mosaic" else ""
+    feather = f" -feather={_g(sp.feather_mosaic)}" if is_mosaic else ""
     return [f"stack r_pp_light rej {_g(sp.sigma_low)} {_g(sp.sigma_high)} -norm=addscale -output_norm -rgb_equal{feather} -out=result"]
-
-
-def mirrorx_cmds() -> list:
-    # Seestar frames are vertically flipped; correct single-panel stacks (mosaic uses WCS instead).
-    return ["mirrorx_single result"]
 
 
 def _nonzero(path) -> bool:
@@ -64,9 +64,12 @@ def _nonzero(path) -> bool:
     return p.exists() and p.stat().st_size > 0
 
 
-def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
+def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is_mosaic=False):
     # Build the ordered preprocess stages for this mode, each wired to a SIRIL script that is
     # written into logs/ then run. `runner` is injectable so tests never launch real SIRIL.
+    # `is_mosaic` selects the assembly (WCS+feather, no flip) vs single-panel (2-pass + mirrorx);
+    # it is auto-detected by the caller (detect.detect_mosaic) and only true for galaxy captures
+    # that span more than one FOV.
     import subprocess
     runner = runner or subprocess.run
     proc = ws.process
@@ -89,7 +92,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
         lambda: (proc / "pp_light_.seq").exists()))
 
     # register: WCS (mosaic) or 2-pass (single-panel), then apply registration.
-    if mode == "dso-mosaic":
+    if is_mosaic:
         # seqplatesolve has a known false-negative in SIRIL 1.4 (reports failure even when every
         # frame solved), which aborts the script before seqapplyreg. Work around by running them
         # in separate SIRIL processes within a single stage.
@@ -101,7 +104,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
     else:
         stages.append(Stage(
             "register",
-            lambda: _run("register", register_cmds(mode, cfg.pipeline.stack), cd=str(proc)),
+            lambda: _run("register", register_cmds(mode, is_mosaic, cfg.pipeline.stack), cd=str(proc)),
             lambda: (proc / "r_pp_light_.seq").exists()))
 
     anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
@@ -109,10 +112,10 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
     # stack: sigma-clip the registered sequence → result.fit (linear). No mirror/anchor here.
     stages.append(Stage(
         "stack",
-        lambda: _run("stack", stack_cmds(mode, cfg.pipeline.stack), cd=str(proc)),
+        lambda: _run("stack", stack_cmds(is_mosaic, cfg.pipeline.stack), cd=str(proc)),
         lambda: (proc / "result.fit").exists()))
 
-    if is_single_panel(mode) and not spcc_in_preprocess(mode):
+    if needs_mirrorx(is_mosaic) and not spcc_in_preprocess(mode):
         # mirrorx: undo the Seestar vertical flip and save the golden anchor.
         # (Emission/star-cluster — no SPCC in preprocess, so this is the final preprocess stage.)
         def _mirrorx_run():
@@ -136,7 +139,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                 spcc_cmd(sensor=cfg.pipeline.spcc.sensor, osc_filter=cfg.pipeline.spcc.osc_filter,
                          whiteref=cfg.pipeline.spcc.whiteref, catalog=cfg.pipeline.spcc.catalog),
             ]
-            if is_single_panel(mode):
+            if needs_mirrorx(is_mosaic):
                 cmds.append("mirrorx")
             cmds += [f"save {anchor_noext}", "close"]
             result = _run("spcc", cmds, cd=str(proc))
@@ -144,7 +147,7 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                 print("  WARNING: Plate solving failed -- saving linear stack without SPCC color "
                       "calibration. Colors may need manual correction in post-processing.")
                 fallback = ["load result"]
-                if is_single_panel(mode):
+                if needs_mirrorx(is_mosaic):
                     fallback.append("mirrorx")
                 fallback += [f"save {anchor_noext}", "close"]
                 _run("spcc_fallback", fallback, cd=str(proc))
@@ -156,9 +159,9 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None):
                     print("  note: local Gaia catalog not found -- SPCC used the online ESA Gaia "
                           "catalog. Install the local catalog for offline/faster runs.")
                 if "imprecise solution" in out:
-                    print("  note: SPCC reported an imprecise color solution (mosaic calibrates "
-                          "before gradient removal); colors may need a tweak, or re-run --redo spcc "
-                          "after installing the local catalog.")
+                    print("  note: SPCC reported an imprecise color solution (galaxy/reflection "
+                          "calibrate before gradient removal); colors may need a tweak, or re-run "
+                          "--redo spcc after installing the local catalog.")
         stages.append(Stage("spcc", _spcc_run, lambda: _nonzero(anchor)))
 
     return stages

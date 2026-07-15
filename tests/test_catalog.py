@@ -4,7 +4,7 @@ from aporntool.catalog import resolve_target, TARGETS
 
 def test_known_target_case_and_space_insensitive():
     t = resolve_target("m 31")
-    assert t.ra == 11.25 and t.dec == 41.4 and t.mode == "mosaic"
+    assert t.ra == 11.25 and t.dec == 41.4 and t.mode == "galaxy"
 
 
 def test_cluster_present():

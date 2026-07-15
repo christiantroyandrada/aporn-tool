@@ -48,8 +48,17 @@ def _install_fake_siril(monkeypatch, tmp_home, calls):
         class R: returncode = 0; stdout = ""; stderr = ""
         return R()
 
+    def fake_run_composite_finish(clean_fits, out_stem, *, mode, starnet_exe, runner=None,
+                                  scratch_dir=None, params=None, star_strength=None, jpeg_quality=95):
+        # Emission/mosaic finish is now the composite dual-layer — fabricate its four deliverables.
+        for ext in ("fits", "tif", "png", "jpg"):
+            p = Path(f"{out_stem}.{ext}"); p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("x", encoding="utf-8")
+        return Path(f"{out_stem}.tif")
+
     monkeypatch.setattr(pp, "run_siril", fake_run_siril)
     monkeypatch.setattr(fin, "run_siril", fake_run_siril)
+    monkeypatch.setattr(fin, "run_composite_finish", fake_run_composite_finish)
 
 
 def test_emission_run_reaches_golden_anchor(capsys, tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ from pathlib import Path
 import aporntool
 from aporntool.discovery import discover_tool
 from aporntool.config import Config, load_config, save_config
-from aporntool.detect import resolve_target_auto
+from aporntool.detect import resolve_target_auto, detect_mosaic
 from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
@@ -17,7 +17,7 @@ from aporntool.stages.preprocess import build_preprocess_stages
 from aporntool.stages.finish import build_finish_stages
 from aporntool.stages.engine import run_pipeline
 
-DSO_MODES = ["dso-mosaic", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
+DSO_MODES = ["dso-galaxy", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
 ALL_TOOLS = ["siril", "graxpert", "starnet2", "ffmpeg"]
 
 
@@ -55,9 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--no-crop", action="store_true",
                         help="disable auto-crop; use the full frame")
         pm.add_argument("--star-reduce", type=float, default=None,
-                        help="mosaic star-blend fraction after StarNet removal "
-                             "(overrides config; default from config is 0.5)")
+                        help="composite star-layer strength 0..1 (galaxy/emission/reflection): "
+                             "1.0 keeps all stars, lower reduces them. Overrides the per-mode "
+                             "default (galaxy 0.5, emission/reflection 1.0)")
         pm.add_argument("--profile", default=None, help="color/stretch preset override")
+        # Mosaic is a capture attribute, auto-detected from the subs' pointing spread; these force it.
+        pm.add_argument("--mosaic", action="store_true",
+                        help="force multi-panel mosaic assembly (galaxy; default: auto-detect)")
+        pm.add_argument("--single", action="store_true",
+                        help="force single-panel assembly (galaxy; default: auto-detect)")
         pm.add_argument("--clean", action="store_true",
                         help="on success, delete working files except the golden anchor "
                              "(reclaims disk; re-finish still works via --from bge/--from finish)")
@@ -154,6 +160,32 @@ def _ensure_config_file(cfg, path) -> None:
         pass
 
 
+def _resolve_assembly(mode, in_dir, args) -> bool:
+    # Decide multi-panel mosaic vs single-panel assembly and ALWAYS print it (FR-10a: never a silent
+    # guess). Only galaxy captures assemble as mosaics for now; nebula/cluster mosaics are a planned
+    # follow-up, so for those we stay single-panel and just warn if the data looks like a mosaic.
+    force_mosaic = getattr(args, "mosaic", False)
+    force_single = getattr(args, "single", False)
+    if force_mosaic:
+        if mode != "dso-galaxy":
+            print(f"  note: --mosaic is only supported for dso-galaxy; processing {mode} single-panel.")
+            return False
+        print("  Assembly: MOSAIC (forced via --mosaic).")
+        return True
+    if force_single:
+        print("  Assembly: single-panel (forced via --single).")
+        return False
+    det = detect_mosaic(in_dir)
+    if mode != "dso-galaxy":
+        if det.is_mosaic:
+            print(f"  note: {det.reason}; multi-panel assembly is only supported for dso-galaxy "
+                  "right now -- processing single-panel (panel seams may show).")
+        return False
+    print(f"  Assembly: {'MOSAIC' if det.is_mosaic else 'single-panel'} (auto) -- {det.reason}")
+    print("           override with --mosaic / --single if this is wrong.")
+    return det.is_mosaic
+
+
 def cmd_mode(args, mode: str) -> int:
     # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + run the
     # preprocess pipeline through to the golden anchor (finishing stages land in Plan 4).
@@ -161,6 +193,10 @@ def cmd_mode(args, mode: str) -> int:
     if args.crop and args.no_crop:
         print("ERROR: --crop and --no-crop are mutually exclusive. Pass one, or neither "
               "for the default auto-crop.")
+        return 1
+    if getattr(args, "mosaic", False) and getattr(args, "single", False):
+        print("ERROR: --mosaic and --single are mutually exclusive. Pass one, or neither "
+              "to auto-detect the assembly from the subs.")
         return 1
     in_dirs = [to_input_dir(sanitize_dropped_path(p)) for p in args.inputs]
     for d in in_dirs:
@@ -219,7 +255,11 @@ def cmd_mode(args, mode: str) -> int:
     # Auto-crop by default (FR-20): trims ragged registration/mosaic borders. An explicit --crop
     # box always wins; --no-crop disables cropping entirely (use the full frame).
     crop = args.crop if args.crop else (None if args.no_crop else "auto")
-    stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril)
+    # Mosaic vs single-panel is a capture attribute (orthogonal to target type). Only galaxies can
+    # be mosaics for now; auto-detect from the subs' pointing spread unless --mosaic/--single forces
+    # it. Always print the decision so the user can confirm or override (never a silent guess).
+    is_mosaic = _resolve_assembly(mode, in_dirs[0], args)
+    stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril, is_mosaic=is_mosaic)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]

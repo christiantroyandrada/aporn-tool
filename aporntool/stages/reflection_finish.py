@@ -140,34 +140,11 @@ REFLECTION_DEFAULTS = dict(target_bg=0.35, shadows_clip=-2.8, sat_r=0.30, sat_g=
 
 def run_reflection_finish(clean_fits, out_stem, *, starnet_exe, runner=subprocess.run,
                           scratch_dir=None, params=None, jpeg_quality=95):
-    # Dual-layer reflection finish: stretch -> StarNet -> process starless (kill green, boost blue,
-    # lift midtones, local contrast, DARKEN background) + process stars -> screen-blend -> save.
-    # NOTE: cropping is NOT done here — the bge stage already crops the linear anchor (via SIRIL)
-    # before GraXpert, matching every other mode's crop-before-background-extraction order.
-    import tifffile
-    from astropy.io import fits
-    p = {**REFLECTION_DEFAULTS, **(params or {})}
-    d = fits.getdata(str(clean_fits)).astype(np.float64)
-    img = np.moveaxis(d, 0, -1) if d.ndim == 3 else np.stack([d] * 3, -1)
-    img = np.clip(img, 0, None)
-    mx = np.percentile(img, 99.995) or 1.0
-    stretched = autostretch(np.clip(img / mx, 0, 1), target_bg=p["target_bg"],
-                            shadows_clip=p["shadows_clip"])
-    work = Path(scratch_dir) if scratch_dir else Path(out_stem).parent
-    work.mkdir(parents=True, exist_ok=True)
-    tin, tout = work / "_sn_in.tif", work / "_sn_out.tif"
-    tifffile.imwrite(str(tin), (stretched * 65535 + 0.5).astype(np.uint16), photometric="rgb")
-    runner([str(starnet_exe), "-i", str(tin), "-o", str(tout)], capture_output=True, text=True)
-    starless = fix_starnet_grid(tifffile.imread(str(tout)).astype(np.float64) / 65535.0)
-    stars = np.clip(stretched - starless, 0, 1)
-    sl = scnr_green(starless)
-    sl = saturate(sl, p["sat_r"], p["sat_g"], p["sat_b"])
-    sl = midtone_boost(sl, p["midboost"])
-    sl = local_contrast(sl, p["lc"])
-    sl = darken_background(sl, p["bgpull"], p["gamma"])
-    # Kill the coloured sky noise the global blue boost amplified, keeping the nebula's colour.
-    sl = desaturate_background(sl, p["bg_desat"], p["bg_desat_soft"])
-    st = process_stars(stars, p["st_bright"], p["st_sat"])
-    combined = screen_blend(sl, st)
-    save_deliverables(combined, out_stem, jpeg_quality)
-    return Path(str(out_stem) + ".tif")
+    # Reflection is now the shared composite core with the reflection profile — kept as a named
+    # entry point for the reflection finish stage (and its regression tests). The dual-layer chain
+    # (stretch -> StarNet -> process starless + stars -> screen-blend) lives in composite_finish.
+    # Cropping is NOT done here — the bge stage already cropped the linear anchor before GraXpert.
+    from aporntool.stages.composite_finish import run_composite_finish   # lazy: avoid import cycle
+    return run_composite_finish(clean_fits, out_stem, mode="dso-reflection-nebula",
+                                starnet_exe=starnet_exe, runner=runner, scratch_dir=scratch_dir,
+                                params=params, jpeg_quality=jpeg_quality)

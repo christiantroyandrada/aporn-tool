@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.5.0 — 2026-07-15
+
+### Changed (breaking)
+- **Modes are now target *types*, and mosaic is an auto-detected capture attribute.** `dso-mosaic`
+  is **removed**; galaxies use the new **`dso-galaxy`** mode. Whether a capture is a single panel or
+  a multi-panel **mosaic** is detected automatically from the subs' pointing spread (>~½ FOV → mosaic)
+  and selects the assembly (WCS + `feather`, no flip) vs single-panel (`register -2pass` + `mirrorx`).
+  Override with `--mosaic` / `--single`; the decision is always printed. This matches how the
+  community (and the Seestar UI) treats a mosaic — a technique applied to any target type, not a
+  target category. M31 → `dso-galaxy` (auto-mosaic); M51/M101/M33 → `dso-galaxy` (auto-single).
+  NGC 7000 recategorised from mosaic to `emission`.
+  - *Scope:* single↔mosaic assembly is wired for galaxies now; nebula-complex mosaics
+    (Rho Ophiuchi, Orion) via emission/reflection are architecture-ready but deferred (a warning
+    fires if a nebula capture looks like a mosaic).
+
+### Added
+- **Composite dual-layer finish across all non-cluster DSO modes** (`dso-galaxy`,
+  `dso-emission-nebula`, `dso-reflection-nebula`). Following the modern standard (StarNet /
+  StarXTerminator): the stars are removed, the starless *nebula* layer and the *stars* layer are
+  processed independently, then recombined with a **screen blend**. This lets the background be
+  darkened and denoised hard without smearing the stars — dramatically cleaner results on
+  short-integration / light-polluted data. New shared core `aporntool/stages/composite_finish.py`
+  (`run_composite_finish`, `composite_layers`, per-mode `PROFILES`), reusing the VdB106-validated
+  reflection primitives so there is one implementation shared everywhere.
+- **`--star-reduce` now applies to every composite mode** as the star-layer strength (0..1; 1.0
+  keeps all stars, lower reduces them). Per-mode defaults: galaxy 0.5, emission/reflection 1.0.
+
+### Changed
+- `dso-emission-nebula` now runs a SIRIL prep (crop → gradient → local-Gaia platesolve + SPCC →
+  denoise) into a linear `_clean.fit`, then the composite dual-layer finish. On reddened
+  galactic-plane fields where SPCC can't derive a valid white balance, the composite's SCNR +
+  red-preserving saturation still delivers crimson Hα. Emission now depends on **StarNet2**
+  (checked in preflight), like reflection.
+- `dso-galaxy` finish is now the composite dual-layer on the GraXpert-cleaned linear (was a SIRIL
+  stretch → GHT → StarNet → PixelMath blend).
+- `dso-star-cluster` is unchanged and deliberately excluded — the stars ARE the subject.
+
+### Notes
+- Emission/galaxy composite look is currently governed by the documented `PROFILES` constants;
+  wiring those into the config schema is a planned follow-up (reflection stays config-driven).
+
 ## v0.4.0 — 2026-07-09
 
 ### Added

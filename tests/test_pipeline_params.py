@@ -21,13 +21,13 @@ from aporntool.catalog import resolve_target
 # ---- 1. defaults byte-identical (regression lock on the proven pipeline) ----
 
 def test_stack_register_defaults_identical():
-    assert stack_cmds("dso-mosaic") == [
+    assert stack_cmds(True) == [
         "stack r_pp_light rej 3 3 -norm=addscale -output_norm -rgb_equal -feather=100 -out=result"]
-    assert stack_cmds("dso-emission-nebula") == [
+    assert stack_cmds(False) == [
         "stack r_pp_light rej 3 3 -norm=addscale -output_norm -rgb_equal -out=result"]
-    assert register_cmds("dso-mosaic")[1] == "seqapplyreg pp_light -filter-round=2.5k -framing=max"
-    assert register_cmds("dso-star-cluster")[1] == "seqapplyreg pp_light -filter-round=2.5k -filter-wfwhm=2.5k"
-    assert register_cmds("dso-emission-nebula")[1] == "seqapplyreg pp_light -filter-round=2.5k"
+    assert register_cmds("dso-galaxy", True)[1] == "seqapplyreg pp_light -filter-round=2.5k -framing=max"
+    assert register_cmds("dso-star-cluster", False)[1] == "seqapplyreg pp_light -filter-round=2.5k -filter-wfwhm=2.5k"
+    assert register_cmds("dso-emission-nebula", False)[1] == "seqapplyreg pp_light -filter-round=2.5k"
 
 
 def test_finish_defaults_identical():
@@ -56,10 +56,10 @@ def test_graxpert_spcc_defaults_identical():
 
 def test_stack_register_overrides():
     sp = StackParams(sigma_low=2, sigma_high=4, feather_mosaic=80, filter_round="3k", filter_wfwhm="2k")
-    assert stack_cmds("dso-mosaic", sp)[0] == (
+    assert stack_cmds(True, sp)[0] == (
         "stack r_pp_light rej 2 4 -norm=addscale -output_norm -rgb_equal -feather=80 -out=result")
-    assert register_cmds("dso-mosaic", sp)[1] == "seqapplyreg pp_light -filter-round=3k -framing=max"
-    assert register_cmds("dso-star-cluster", sp)[1] == "seqapplyreg pp_light -filter-round=3k -filter-wfwhm=2k"
+    assert register_cmds("dso-galaxy", True, sp)[1] == "seqapplyreg pp_light -filter-round=3k -framing=max"
+    assert register_cmds("dso-star-cluster", False, sp)[1] == "seqapplyreg pp_light -filter-round=3k -filter-wfwhm=2k"
 
 
 def test_mosaic_finish_overrides():
@@ -126,9 +126,9 @@ def _rec(scripts):
     return run
 
 
-def test_config_file_flows_into_emitted_commands(tmp_path):
+def test_config_file_flows_into_emitted_commands(tmp_path, monkeypatch):
     cfgpath = tmp_path / "aporntool.config.json"
-    json.dump({"pipeline": {"emission_finish": {"satu": 0.42, "satu_bg": 0.11},
+    json.dump({"pipeline": {"emission_finish": {"subsky_degree": 2},
                             "stack": {"sigma_low": 2, "sigma_high": 5}}}, open(cfgpath, "w"))
     cfg = load_config(cfgpath)
 
@@ -139,8 +139,12 @@ def test_config_file_flows_into_emitted_commands(tmp_path):
     next(s for s in pre if s.id == "stack").run()
     assert any("rej 2 5" in s for s in scripts), scripts
 
+    # Emission finish is now a SIRIL prep (config subsky degree flows here) + the numpy composite
+    # dual-layer (stubbed); assert the config value reaches the emitted prep script.
+    import aporntool.stages.finish as finmod
+    monkeypatch.setattr(finmod, "run_composite_finish", lambda *a, **k: None)
     scripts.clear()
     fin = build_finish_stages("dso-emission-nebula", ws, cfg, resolve_target("M8"),
-                              siril_exe="siril-cli", crop=None, runner=_rec(scripts))
+                              siril_exe="siril-cli", starnet_exe="starnet2", crop=None, runner=_rec(scripts))
     next(s for s in fin if s.id == "finish").run()
-    assert any("satu 0.42 0.11" in s for s in scripts), scripts
+    assert any("subsky 2" in s for s in scripts), scripts

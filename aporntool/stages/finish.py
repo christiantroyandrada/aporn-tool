@@ -1,5 +1,4 @@
 """Assemble per-mode finish stages: golden anchor → deliverables at the --out root."""
-import shutil
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -7,9 +6,8 @@ from pathlib import Path
 from aporntool.stages.engine import Stage
 from aporntool.tools.siril import build_ssf, write_ssf, run_siril, spcc_cmd, gaia_catalog_cmds
 from aporntool.tools.graxpert import bge_cmd, denoise_cmd, run_graxpert
-from aporntool.stages.finish_cmds import (
-    mosaic_finish_cmds, emission_finish_cmds, cluster_finish_cmds,
-)
+from aporntool.stages.finish_cmds import crop_cmds, cluster_finish_cmds
+from aporntool.stages.composite_finish import run_composite_finish
 from aporntool.stages.reflection_finish import run_reflection_finish
 from aporntool.stages.crop import resolve_crop
 
@@ -23,17 +21,6 @@ def _all_deliverables(ws) -> bool:
     # FR-4/FR-27: all four deliverables must exist (and be non-empty) at the --out root.
     base = ws.out_root / f"{ws.target}_final"
     return all(_nonzero(f"{base}.{e}") for e in ("fits", "tif", "png", "jpg"))
-
-
-def _publish(scratch_dir, ws) -> None:
-    # Copy the four deliverables SIRIL wrote (bare names) in the finish scratch cwd out to the
-    # --out root, renaming SIRIL's .fit to the .fits deliverable name.
-    base = ws.out_root / f"{ws.target}_final"
-    base.parent.mkdir(parents=True, exist_ok=True)
-    for src_ext, dst_ext in ((".fit", ".fits"), (".tif", ".tif"), (".png", ".png"), (".jpg", ".jpg")):
-        src = Path(scratch_dir) / f"{ws.target}_final{src_ext}"
-        if src.exists():
-            shutil.copy2(src, f"{base}{dst_ext}")
 
 
 def _promote_fit_to_fits(ws) -> None:
@@ -60,7 +47,7 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
 
     spcc = _spcc_string(cfg)
 
-    if mode == "dso-mosaic":
+    if mode == "dso-galaxy":
         cropped = ws.linear / f"{ws.target}_cropped"
         bge_out = ws.graxpert / f"{ws.target}_bge"
         clean = ws.graxpert / f"{ws.target}_clean"
@@ -85,32 +72,50 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
 
         def _finish():
-            # SIRIL's `pm`/`starnet -starmask` only resolve BARE names in the current working
-            # dir — run this script with cd=ws.finish, load the _clean image via a path relative
-            # to that scratch dir, and save under a bare out name so every SIRIL command in
-            # mosaic_finish_cmds stays bare. Then copy the real deliverables out to --out root.
-            bare_out = f"{ws.target}_final"
-            rel_clean = f"../03_graxpert/{ws.target}_clean"
-            _siril("finish", mosaic_finish_cmds(rel_clean, bare_out, star_reduce=star_reduce,
-                                                params=cfg.pipeline.mosaic_finish,
-                                                jpeg_quality=cfg.pipeline.jpeg_quality), cd=str(ws.finish))
-            _publish(ws.finish, ws)
+            # Composite dual-layer finish on the GraXpert-cleaned linear: stretch -> StarNet ->
+            # process starless (galaxy/nebula) + stars -> screen-blend. StarNet scratch stays under
+            # ws.finish (never beside the deliverables, FR-4). star_reduce (default 0.5) blends only
+            # a fraction of the stars back (#10 — full removal looks AI-generated).
+            strength = star_reduce if star_reduce is not None else cfg.pipeline.mosaic_finish.star_reduce
+            run_composite_finish(f"{clean.as_posix()}.fits", out_name, mode="dso-galaxy",
+                                 starnet_exe=starnet_exe, runner=runner, scratch_dir=str(ws.finish),
+                                 star_strength=strength, jpeg_quality=cfg.pipeline.jpeg_quality)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
-    elif mode in ("dso-emission-nebula", "dso-star-cluster"):
-        gen = emission_finish_cmds if mode == "dso-emission-nebula" else cluster_finish_cmds
-        fparams = (cfg.pipeline.emission_finish if mode == "dso-emission-nebula"
-                   else cfg.pipeline.cluster_finish)
+    elif mode == "dso-emission-nebula":
         def _finish():
-            # Resolve at RUN time — the anchor .fit only exists once preprocess has produced it.
+            # SIRIL prep: crop -> gradient -> local-Gaia platesolve + SPCC -> denoise, saved as a
+            # linear _clean.fit. Then the composite dual-layer finish (stretch -> StarNet -> starless
+            # nebula + stars -> screen-blend). SPCC may fail to calibrate on reddened galactic-plane
+            # fields (benign) — the composite's SCNR + red-preserving saturation gives crimson Halpha
+            # regardless. Rich Milky-Way fields keep all stars (star_strength default 1.0).
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
+            clean = ws.finish / f"{ws.target}_clean"
+            prep = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
+                cfg.catalog_astro and cfg.catalog_photo) else []
+            prep += [f"load {anchor.as_posix()}", *crop_cmds(box),
+                     f"subsky {cfg.pipeline.emission_finish.subsky_degree}",
+                     f"platesolve -catalog={cfg.pipeline.spcc.catalog}", spcc, "denoise",
+                     f"save {clean.as_posix()}"]
+            _siril("finish", prep, cd=str(ws.linear))
+            run_composite_finish(f"{clean.as_posix()}.fit", out_name, mode="dso-emission-nebula",
+                                 starnet_exe=starnet_exe, runner=runner, scratch_dir=str(ws.finish),
+                                 star_strength=star_reduce, jpeg_quality=cfg.pipeline.jpeg_quality)
+        stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
+
+    elif mode == "dso-star-cluster":
+        # Star clusters are the ONE mode that never uses the composite — the stars ARE the subject,
+        # so no StarNet removal. Straight SIRIL finish (SPCC + light denoise + highlight-protected).
+        def _finish():
             box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             cmds = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
                 cfg.catalog_astro and cfg.catalog_photo) else []
-            cmds += gen(anchor.as_posix(), out_name, box=box, spcc=spcc, params=fparams,
-                        catalog=cfg.pipeline.spcc.catalog, jpeg_quality=cfg.pipeline.jpeg_quality)
+            cmds += cluster_finish_cmds(anchor.as_posix(), out_name, box=box, spcc=spcc,
+                                        params=cfg.pipeline.cluster_finish,
+                                        catalog=cfg.pipeline.spcc.catalog,
+                                        jpeg_quality=cfg.pipeline.jpeg_quality)
             _siril("finish", cmds, cd=str(ws.linear))
-            # SIRIL's `save` writes .fit; the FR-27 deliverable name is .fits.
-            _promote_fit_to_fits(ws)
+            _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     elif mode == "dso-reflection-nebula":

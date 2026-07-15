@@ -25,16 +25,18 @@ def test_graxpert_models_present(tmp_path):
     assert check_graxpert_models(tmp_path).ok is True
 
 
-def test_run_preflight_emission_needs_only_siril(tmp_path):
+def test_run_preflight_emission_needs_siril_and_starnet(tmp_path):
+    # Emission now runs the composite dual-layer finish (StarNet2 CLI directly, like reflection),
+    # so it needs siril + starnet2 — but still NOT GraXpert (it uses SIRIL subsky/denoise).
     results = run_preflight("dso-emission-nebula",
-                            tool_paths={"siril": "/usr/bin/siril"},
+                            tool_paths={"siril": "/usr/bin/siril", "starnet2": "/usr/bin/starnet2"},
                             graxpert_model_root=tmp_path)
     names = {r.name for r in results}
-    assert names == {"siril"}                # emission does NOT need GraXpert/StarNet
+    assert names == {"siril", "starnet2"}
 
 
 def test_run_preflight_mosaic_flags_missing_graxpert_model(tmp_path):
-    results = run_preflight("dso-mosaic",
+    results = run_preflight("dso-galaxy",
                             tool_paths={"siril": "/s", "graxpert": "/g", "starnet2": "/n"},
                             graxpert_model_root=tmp_path)   # empty → model check fails
     assert any(r.name == "graxpert-models" and not r.ok for r in results)
@@ -52,16 +54,18 @@ def test_check_siril_starnet_fails_when_unset_or_missing(tmp_path):
     assert missing.ok is False and "missing" in missing.detail.lower()
 
 
-def test_mosaic_preflight_flags_unconfigured_siril_starnet(tmp_path):
-    # starnet2 on PATH but NOT set inside SIRIL → mosaic preflight must still flag it (the
-    # false-positive that let a real M31 run fail at the finish stage).
+def test_galaxy_preflight_needs_starnet2_binary_not_siril_internal(tmp_path):
+    # Galaxy now runs the composite finish (StarNet2 CLI directly), so it needs the starnet2 BINARY
+    # like reflection — but NOT StarNet configured inside SIRIL (that requirement is gone for all modes).
     for kind in ("bge", "denoise"):
         (tmp_path / f"{kind}-ai-models" / "1").mkdir(parents=True)
         (tmp_path / f"{kind}-ai-models" / "1" / "m.onnx").write_bytes(b"x")
-    results = run_preflight("dso-mosaic",
+    results = run_preflight("dso-galaxy",
                             tool_paths={"siril": "/s", "graxpert": "/g", "starnet2": "/usr/bin/starnet2"},
                             graxpert_model_root=tmp_path, siril_starnet_exe="")
-    assert any(r.name == "siril-starnet" and not r.ok for r in results)
+    names = {r.name for r in results}
+    assert "starnet2" in names                                   # needs the StarNet2 binary
+    assert not any(r.name == "siril-starnet" for r in results)   # no SIRIL-internal requirement
 
 
 def test_emission_preflight_has_no_siril_starnet_check(tmp_path):

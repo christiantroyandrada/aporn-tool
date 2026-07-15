@@ -26,9 +26,24 @@ def _rec(scripts):
     return run
 
 
+def _capture_composite(calls, fabricate_out=False):
+    # Stand in for run_composite_finish: record how the finish stage called it (mode, paths,
+    # star strength, scratch dir) and optionally fabricate the four deliverables so produces() passes.
+    def fake(clean_fits, out_stem, *, mode, starnet_exe, runner=None, scratch_dir=None,
+             params=None, star_strength=None, jpeg_quality=95):
+        calls.append(dict(clean=str(clean_fits), out=str(out_stem), mode=mode,
+                          star_strength=star_strength, scratch_dir=str(scratch_dir)))
+        if fabricate_out:
+            for ext in ("fits", "tif", "png", "jpg"):
+                p = Path(f"{out_stem}.{ext}")
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("x", encoding="utf-8")
+    return fake
+
+
 def test_mosaic_finish_stage_ids(tmp_path):
     ws = Workspace(tmp_path, "M31"); ws.create()
-    stages = build_finish_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+    stages = build_finish_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
                                  siril_exe="siril-cli", graxpert_exe="GraXpert.exe")
     assert [s.id for s in stages] == ["bge", "denoise", "finish"]
 
@@ -40,16 +55,22 @@ def test_emission_finish_is_single_stage(tmp_path):
     assert [s.id for s in stages] == ["finish"]
 
 
-def test_emission_finish_writes_deliverables_and_spcc(tmp_path):
+def test_emission_finish_preps_spcc_then_runs_composite(tmp_path, monkeypatch):
+    # Emission now: a SIRIL prep (crop/subsky/SPCC/denoise -> _clean.fit) THEN the composite
+    # dual-layer finish. The prep ssf carries the SPCC; deliverables come from the composite.
+    import aporntool.stages.finish as fin
     ws = Workspace(tmp_path, "M8"); ws.create()
-    scripts = []
+    calls = []
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite(calls))
     stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
-                                 siril_exe="siril-cli", runner=_rec(scripts))
-    finish = next(s for s in stages if s.id == "finish")
-    finish.run()
-    text = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
-    assert 'spcc "-oscsensor=Sony IMX662"' in text
-    assert "savetif" in text and "M8_final" in text
+                                 siril_exe="siril-cli", starnet_exe="starnet2", runner=_rec([]))
+    next(s for s in stages if s.id == "finish").run()
+    prep = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
+    assert 'spcc "-oscsensor=Sony IMX662"' in prep and "subsky 1" in prep
+    assert "denoise" in prep and "M8_clean" in prep
+    assert calls and calls[0]["mode"] == "dso-emission-nebula"
+    assert calls[0]["out"].endswith("M8_final")
+    assert str(ws.finish) in calls[0]["scratch_dir"]     # StarNet scratch stays under _work (FR-4)
 
 
 def test_reflection_finish_stage_ids(tmp_path):
@@ -60,78 +81,38 @@ def test_reflection_finish_stage_ids(tmp_path):
     assert [s.id for s in stages] == ["bge", "denoise", "finish"]
 
 
-def _fake_run_siril_mosaic_finish(scripts):
-    # Fabricate the mosaic finish deliverables under ws.finish (bare names, cwd=ws.finish),
-    # exactly like real SIRIL would when `cd` points there and names are bare.
-    def run(script_path, *, workdir, siril_exe, runner=None, log_path=None):
-        text = Path(script_path).read_text(encoding="utf-8")
-        scripts.append(text)
-        if "starnet" in text:
-            # workdir passed to run_siril is ws.work; the script's own `cd` line names the
-            # real scratch dir SIRIL executes in — parse it out.
-            import re
-            m = re.search(r'cd "([^"]+)"', text)
-            finish_dir = Path(m.group(1))
-            # Determine the bare out name from a `save <name>_stretched` line.
-            m2 = re.search(r"save (\S+)_stretched", text)
-            bare = m2.group(1)
-            for ext in ("fit", "tif", "png", "jpg"):
-                (finish_dir / f"{bare}.{ext}").write_text("x", encoding="utf-8")
-        class R: returncode = 0; stdout = ""; stderr = ""
-        return R()
-    return run
-
-
-def test_mosaic_finish_runs_in_scratch_cwd_with_bare_names_and_publishes_four_deliverables(tmp_path, monkeypatch):
+def test_mosaic_finish_runs_composite_on_graxpert_clean(tmp_path, monkeypatch):
+    # Mosaic finish is now the composite dual-layer on the GraXpert _clean.fits (not a SIRIL
+    # stretch/starnet/pm script). Deliverables come from the composite.
     import aporntool.stages.finish as fin
     ws = Workspace(tmp_path, "M31"); ws.create()
-    # Fabricate the GraXpert _clean.fits the finish stage loads via a relative path.
-    clean = ws.graxpert / "M31_clean.fits"
-    clean.write_text("x", encoding="utf-8")
-
-    scripts = []
-    monkeypatch.setattr(fin, "run_siril", _fake_run_siril_mosaic_finish(scripts))
-
-    stages = build_finish_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
-                                 siril_exe="siril-cli", graxpert_exe="GraXpert.exe")
+    calls = []
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite(calls, fabricate_out=True))
+    stages = build_finish_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
+                                 siril_exe="siril-cli", graxpert_exe="GraXpert.exe", starnet_exe="starnet2")
     finish = next(s for s in stages if s.id == "finish")
     finish.run()
 
-    text = scripts[-1]
-    assert f'cd "{ws.finish}"' in text
-    assert "../03_graxpert/M31_clean" in text
-    # bare out name only in the command lines (everything after the `cd` line) — no absolute
-    # out_root path baked into save/starnet/pm commands.
-    body = text.split("\n", 2)[-1]
-    assert str(ws.out_root) not in body
-    assert "M31_final" in body
-
-    base = ws.out_root / "M31_final"
+    assert calls and calls[0]["mode"] == "dso-galaxy"
+    assert "M31_clean" in calls[0]["clean"]                # loads the GraXpert-cleaned linear
+    assert str(ws.finish) in calls[0]["scratch_dir"]       # StarNet scratch stays under _work (FR-4)
+    assert calls[0]["star_strength"] == 0.5                # mosaic reduces stars to config default
     for ext in ("fits", "tif", "png", "jpg"):
-        assert (base.parent / f"M31_final.{ext}").exists(), f"missing {ext}"
+        assert (ws.out_root / f"M31_final.{ext}").exists(), f"missing {ext}"
     assert finish.produces()
 
 
-def test_emission_finish_renames_fit_to_fits_for_produces(tmp_path, monkeypatch):
+def test_emission_finish_produces_deliverables_via_composite(tmp_path, monkeypatch):
+    # The composite writes the four deliverables directly at the --out root (no .fit->.fits rename).
     import aporntool.stages.finish as fin
     ws = Workspace(tmp_path, "M8"); ws.create()
-
-    def fake_run_siril(script_path, *, workdir, siril_exe, runner=None, log_path=None):
-        # SIRIL only ever writes .fit; deliverable lands directly at the --out root.
-        (ws.out_root / "M8_final.fit").write_text("x", encoding="utf-8")
-        for ext in ("tif", "png", "jpg"):
-            (ws.out_root / f"M8_final.{ext}").write_text("x", encoding="utf-8")
-        class R: returncode = 0; stdout = ""; stderr = ""
-        return R()
-    monkeypatch.setattr(fin, "run_siril", fake_run_siril)
-
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite([], fabricate_out=True))
     stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
-                                 siril_exe="siril-cli")
+                                 siril_exe="siril-cli", starnet_exe="starnet2", runner=_rec([]))
     finish = next(s for s in stages if s.id == "finish")
     finish.run()
-
-    assert (ws.out_root / "M8_final.fits").exists()
-    assert not (ws.out_root / "M8_final.fit").exists()
+    for ext in ("fits", "tif", "png", "jpg"):
+        assert (ws.out_root / f"M8_final.{ext}").exists()
     assert finish.produces()
 
 
@@ -148,7 +129,7 @@ def test_mosaic_bge_stage_auto_crop_emits_crop_command(tmp_path, monkeypatch):
     _write_bordered_fits(anchor)
 
     scripts = []
-    stages = build_finish_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+    stages = build_finish_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
                                  siril_exe="siril-cli", graxpert_exe="GraXpert.exe",
                                  crop="auto", runner=_rec(scripts))
     bge = next(s for s in stages if s.id == "bge")
@@ -165,7 +146,7 @@ def test_mosaic_bge_stage_no_crop_skips_crop_command(tmp_path, monkeypatch):
     _write_bordered_fits(anchor)
 
     scripts = []
-    stages = build_finish_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+    stages = build_finish_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
                                  siril_exe="siril-cli", graxpert_exe="GraXpert.exe",
                                  crop=None, runner=_rec(scripts))
     bge = next(s for s in stages if s.id == "bge")
@@ -174,18 +155,19 @@ def test_mosaic_bge_stage_no_crop_skips_crop_command(tmp_path, monkeypatch):
     assert "crop " not in text
 
 
-def test_emission_finish_auto_crop_emits_crop_command(tmp_path):
+def test_emission_finish_auto_crop_emits_crop_command(tmp_path, monkeypatch):
+    import aporntool.stages.finish as fin
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite([]))   # stub the numpy finish
     ws = Workspace(tmp_path, "M8"); ws.create()
     anchor = ws.linear / "M8_Linear.fit"
     _write_bordered_fits(anchor)
 
-    scripts = []
     stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
-                                 siril_exe="siril-cli", crop="auto", runner=_rec(scripts))
+                                 siril_exe="siril-cli", starnet_exe="starnet2", crop="auto", runner=_rec([]))
     finish = next(s for s in stages if s.id == "finish")
     finish.run()
     text = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
-    assert "crop " in text
+    assert "crop " in text     # crop is in the SIRIL prep script
 
 
 def test_reflection_finish_stage_does_not_recrop(tmp_path, monkeypatch):

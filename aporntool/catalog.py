@@ -16,12 +16,15 @@ def _t(name, ra, dec, mode, notes=""):
 
 
 TARGETS = dict([
-    _t("M31", 11.25, 41.4, "mosaic", "M32,M110"),
-    _t("M33", 23.46, 30.66, "mosaic", "boost Ha"),
-    _t("M51", 202.47, 47.20, "mosaic", "NGC5195"),
-    _t("M101", 210.80, 54.35, "mosaic", "low surface brightness"),
-    _t("M81", 148.89, 69.07, "mosaic"),
-    _t("NGC7000", 314.68, 44.53, "mosaic", "Pelican IC5070"),
+    # Galaxies (type = galaxy). Whether a run is single-panel or a multi-panel MOSAIC is a separate,
+    # auto-detected capture attribute (see detect.detect_mosaic) — M31 is usually mosaicked, the
+    # smaller galaxies usually fit one Seestar frame — so it is NOT encoded here.
+    _t("M31", 11.25, 41.4, "galaxy", "M32,M110; usually a mosaic"),
+    _t("M33", 23.46, 30.66, "galaxy", "boost Ha"),
+    _t("M51", 202.47, 47.20, "galaxy", "NGC5195"),
+    _t("M101", 210.80, 54.35, "galaxy", "low surface brightness"),
+    _t("M81", 148.89, 69.07, "galaxy"),
+    _t("NGC7000", 314.68, 44.53, "emission", "North America Nebula; large, often mosaicked"),
     _t("M8", 271.43, -24.41, "emission", "hourglass core"),
     _t("M20", 270.6, -23.03, "emission", "Ha + reflection lobe"),
     _t("M42", 83.82, -5.39, "emission", "very bright core"),

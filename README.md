@@ -55,7 +55,7 @@ raw .fit subs ──► stage ──► SIRIL: calibrate ─► register ─► 
 
 | Mode | Best for | Registration | Gradient | Stars |
 |------|----------|--------------|----------|-------|
-| `dso-mosaic` | galaxies & multi-panel - M31, M33, M51, M101, NGC7000 | WCS plate-solve (`framing=max`) | GraXpert BGE | StarNet2, blend some back |
+| `dso-galaxy` | galaxies - M31, M33, M51, M101, M81 (**mosaic auto-detected** from the subs' pointing spread; override `--mosaic`/`--single`) | WCS `framing=max`+`feather` (mosaic) or `register -2pass`+`mirrorx` (single) | GraXpert BGE | composite dual-layer (StarNet2), blend some back |
 | `dso-emission-nebula` | Hα HII / SNRs - M8, M20, M42, M16, Veil | star-based 2-pass | SIRIL `subsky` | keep all (rich field) |
 | `dso-reflection-nebula` | blue scattered light - VdB106, M78 | star-based 2-pass | GraXpert BGE | dual-layer screen blend |
 | `dso-star-cluster` | globulars & open clusters - M13, M22, M45, M44 | 2-pass (+FWHM cull) | SIRIL `subsky` | **keep all, stars are the subject** |
@@ -70,7 +70,7 @@ Planetary (video → AutoStakkert → finish) is planned; it requires a manual G
 |------|------|--------|
 | **Python 3.10+** | orchestrator | python.org / your package manager |
 | **Siril 1.4+** (`siril-cli`) | stack, register, plate-solve, SPCC, StarNet | https://siril.org/download/ |
-| **GraXpert 3.x** | background extraction + AI denoise (mosaic & reflection) | https://github.com/Steffenhir/GraXpert/releases |
+| **GraXpert 3.x** | background extraction + AI denoise (galaxy & reflection) | https://github.com/Steffenhir/GraXpert/releases |
 | **StarNet2** | star removal | https://www.starnetastro.com/ |
 | **ffmpeg / ffprobe** | planetary + final polish | ffmpeg.org / package manager |
 
@@ -136,9 +136,10 @@ Then complete the three one-time setup steps (the tool's preflight checks the on
 1. **GraXpert AI models** *(mosaic & reflection)* - open GraXpert once and run **Background
    Extraction** and **Denoise** on any image so it downloads the model files. Preflight verifies
    they exist *before* stacking, so a missing model fails in seconds, not after a 30-minute stack.
-2. **StarNet inside SIRIL** *(mosaic)* - SIRIL's built-in `starnet` command runs the executable set
-   in **SIRIL → Preferences → External Programs**. Being on `PATH` is **not** enough for mosaic
-   mode. (Reflection mode calls the StarNet CLI directly, so it only needs it discoverable.)
+2. **StarNet2** *(galaxy, emission, reflection)* - the composite dual-layer finish calls the StarNet2
+   CLI directly, so it just needs to be **discoverable** (set `tool_paths.starnet2` in the config, or
+   have it on `PATH`). No SIRIL-internal StarNet configuration is required. (Star-cluster keeps all
+   its stars and needs no StarNet.)
 3. **Local Gaia catalogs in SIRIL** *(SPCC colour calibration)* - online VizieR is retired. Install
    the sky region matching your target: **Milky Way** for galactic nebulae/low-latitude clusters,
    **Galaxy Season** for high-latitude galaxies. Wrong region → SPCC reports "no stars".
@@ -146,7 +147,7 @@ Then complete the three one-time setup steps (the tool's preflight checks the on
 Validate everything without processing:
 
 ```bash
-aporn-tool dso-mosaic --in "/path/to/subs" --out /path/to/out --target M31 --preflight-only
+aporn-tool dso-galaxy --in "/path/to/subs" --out /path/to/out --target M31 --preflight-only
 ```
 
 ---
@@ -160,7 +161,7 @@ read from the subs' FITS header, and the results land in a folder named after th
 beside your subs:
 
 ```bash
-aporn-tool dso-mosaic --in "/path/to/M31 subs"
+aporn-tool dso-galaxy --in "/path/to/M31 subs"
 ```
 
 Produces `M31_final.tif` (16-bit, the real deliverable), `.png`, `.jpg` (quick-look), and `.fits`
@@ -186,7 +187,7 @@ aporn-tool dso-star-cluster      --in "/data/M13"
 `--in` is repeatable; all `.fit` from every source are staged and stacked together:
 
 ```bash
-aporn-tool dso-mosaic \
+aporn-tool dso-galaxy \
   --in "/data/M31/2026-07-04" \
   --in "/data/M31/2026-07-05" \
   --out /data/out --target M31
@@ -208,10 +209,10 @@ Auto-crop (default) trims empty registration/mosaic borders. Override it:
 
 ```bash
 # keep the full frame (no crop)
-aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --no-crop
+aporn-tool dso-galaxy --in "/data/M31" --out /data/out --target M31 --no-crop
 
 # explicit SIRIL crop box: X Y W H (x from left, y from top)
-aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --crop "162 108 2310 4378"
+aporn-tool dso-galaxy --in "/data/M31" --out /data/out --target M31 --crop "162 108 2310 4378"
 ```
 
 ### 6. Check status and resume
@@ -223,7 +224,7 @@ repeated. Inspect the ledger any time:
 aporn-tool status --out /data/out --target M31
 ```
 ```
-dso-mosaic / M31  (fingerprint 8cd20ff7d100564d)
+dso-galaxy / M31  (fingerprint 8cd20ff7d100564d)
   calibrate  done
   register   done
   stack      done
@@ -238,19 +239,19 @@ Resume at: finish
 
 ```bash
 # redo colour calibration and everything after it (e.g. once the right Gaia region is installed)
-aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --redo spcc
+aporn-tool dso-galaxy --in "/data/M31" --out /data/out --target M31 --redo spcc
 
 # restart at a named stage
-aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --from finish
+aporn-tool dso-galaxy --in "/data/M31" --out /data/out --target M31 --from finish
 
 # ignore all checkpoints and re-run everything
-aporn-tool dso-mosaic --in "/data/M31" --out /data/out --target M31 --force
+aporn-tool dso-galaxy --in "/data/M31" --out /data/out --target M31 --force
 ```
 
 ### 8. The advanced, fully-specified run
 
 ```bash
-aporn-tool dso-mosaic \
+aporn-tool dso-galaxy \
   --in "/data/M31/2026-07-04" --in "/data/M31/2026-07-05" \
   --out /data/out \
   --target M31 \
@@ -275,7 +276,7 @@ aporn-tool <command> [options]
 
 | Command | Purpose |
 |---------|---------|
-| `dso-mosaic`, `dso-emission-nebula`, `dso-reflection-nebula`, `dso-star-cluster` | process a target |
+| `dso-galaxy`, `dso-emission-nebula`, `dso-reflection-nebula`, `dso-star-cluster` | process a target |
 | `config --check [--config PATH]` | show tool discovery; write a starter config |
 | `status --out PATH --target NAME` | print the resume ledger |
 | `--version` | print the version |
@@ -309,7 +310,7 @@ Stage names are **per-mode**. Run `aporn-tool status` to see yours. Current orde
 
 | Mode | Stages (what `--from` / `--redo` accept) |
 |------|------------------------------------------|
-| `dso-mosaic` | `calibrate → register → stack → spcc → bge → denoise → finish` |
+| `dso-galaxy` | `calibrate → register → stack → spcc → bge → denoise → finish` |
 | `dso-reflection-nebula` | `calibrate → register → stack → spcc → bge → denoise → finish` |
 | `dso-emission-nebula` | `calibrate → register → stack → mirrorx → finish` |
 | `dso-star-cluster` | `calibrate → register → stack → mirrorx → finish` |
@@ -426,7 +427,7 @@ the roadmap.
 
 | Symptom | Fix |
 |---------|-----|
-| `no StarNet executable set` (mosaic) | Set StarNet in **SIRIL → Preferences → External Programs**. PATH alone isn't enough for mosaic. |
+| `StarNet2 not found` (galaxy/emission/reflection) | The composite finish calls the StarNet2 CLI directly - set `tool_paths.starnet2` in the config or put it on `PATH`. |
 | Preflight: GraXpert models missing (but installed) | Open GraXpert, run BGE + Denoise once so it downloads the model files. |
 | SPCC "no stars" / imprecise | Install the Gaia region matching the target (Milky Way vs Galaxy Season). |
 | `--out path must not contain spaces` | Choose a space-free output folder (SIRIL limitation). |

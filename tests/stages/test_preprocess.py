@@ -1,6 +1,6 @@
 from aporntool.stages.preprocess import (
-    convert_and_calibrate_cmds, register_cmds, stack_cmds, mirrorx_cmds,
-    is_single_panel, spcc_in_preprocess,
+    convert_and_calibrate_cmds, register_cmds, stack_cmds,
+    needs_mirrorx, spcc_in_preprocess,
 )
 
 
@@ -10,43 +10,45 @@ def test_convert_and_calibrate_merged():
     assert "calibrate light -debayer" in cmds
 
 
-def test_mosaic_register_uses_wcs_and_framing_max():
-    cmds = register_cmds("dso-mosaic")
-    joined = " ".join(cmds)
+def test_mosaic_assembly_register_uses_wcs_and_framing_max():
+    # Assembly (not target type) drives registration: a mosaic plate-solves + reprojects.
+    joined = " ".join(register_cmds("dso-galaxy", True))
     assert "seqplatesolve pp_light" in joined      # WCS assembly path
     assert "-framing=max" in joined
 
 
 def test_single_panel_register_uses_2pass():
-    cmds = register_cmds("dso-emission-nebula")
-    joined = " ".join(cmds)
-    assert "register pp_light -2pass" in joined
-    assert "-framing=max" not in joined
+    # A single-panel capture (any type, incl. a single-panel galaxy) uses star-based 2-pass.
+    for mode in ("dso-emission-nebula", "dso-galaxy"):
+        joined = " ".join(register_cmds(mode, False))
+        assert "register pp_light -2pass" in joined
+        assert "-framing=max" not in joined
 
 
 def test_star_cluster_adds_wfwhm_cull():
-    joined = " ".join(register_cmds("dso-star-cluster"))
+    joined = " ".join(register_cmds("dso-star-cluster", False))
     assert "-filter-round=2.5k" in joined and "-filter-wfwhm=2.5k" in joined
 
 
 def test_mosaic_stack_has_feather_100():
-    joined = " ".join(stack_cmds("dso-mosaic"))
+    joined = " ".join(stack_cmds(True))
     assert "-feather=100" in joined and "-out=result" in joined
 
 
 def test_single_panel_stack_has_no_feather():
-    joined = " ".join(stack_cmds("dso-emission-nebula"))
+    joined = " ".join(stack_cmds(False))
     assert "-feather" not in joined
 
 
-def test_mirrorx_only_single_panel():
-    assert is_single_panel("dso-emission-nebula") is True
-    assert is_single_panel("dso-mosaic") is False
-    assert mirrorx_cmds() == ["mirrorx_single result"]
+def test_needs_mirrorx_only_for_single_panel():
+    # Single-panel captures inherit the Seestar vertical flip → mirror; a mosaic gets orientation
+    # from WCS → must NOT be flipped.
+    assert needs_mirrorx(False) is True       # single panel
+    assert needs_mirrorx(True) is False       # mosaic
 
 
 def test_spcc_in_preprocess_flags():
-    assert spcc_in_preprocess("dso-mosaic") is True
+    assert spcc_in_preprocess("dso-galaxy") is True
     assert spcc_in_preprocess("dso-reflection-nebula") is True
     assert spcc_in_preprocess("dso-emission-nebula") is False   # emission SPCCs in finish
     assert spcc_in_preprocess("dso-star-cluster") is False
@@ -70,11 +72,28 @@ def _fake_runner_factory(record):
     return run
 
 
-def test_mosaic_stage_ids_and_order(tmp_path):
+def test_galaxy_mosaic_stage_ids_and_order(tmp_path):
+    # A galaxy captured as a MOSAIC: WCS assembly (no separate mirrorx stage), SPCC in preprocess.
     ws = Workspace(tmp_path, "M31"); ws.create()
-    stages = build_preprocess_stages("dso-mosaic", ws, Config.default(),
-                                     resolve_target("M31"), siril_exe="siril-cli")
+    stages = build_preprocess_stages("dso-galaxy", ws, Config.default(),
+                                     resolve_target("M31"), siril_exe="siril-cli", is_mosaic=True)
     assert [s.id for s in stages] == ["calibrate", "register", "stack", "spcc"]
+
+
+def test_galaxy_single_panel_registers_2pass_and_mirrors(tmp_path):
+    # A galaxy captured as a SINGLE panel (M51/M33/M101): 2-pass registration + mirrorx (done inside
+    # the SPCC stage, since galaxies SPCC in preprocess), same stage IDs as the mosaic case.
+    ws = Workspace(tmp_path, "M33"); ws.create()
+    scripts = []
+    stages = build_preprocess_stages("dso-galaxy", ws, Config.default(), resolve_target("M33"),
+                                     siril_exe="siril-cli", is_mosaic=False,
+                                     runner=_fake_runner_factory(scripts))
+    assert [s.id for s in stages] == ["calibrate", "register", "stack", "spcc"]
+    next(s for s in stages if s.id == "register").run()
+    assert any("register pp_light -2pass" in s for s in scripts)   # NOT WCS seqplatesolve
+    scripts.clear()
+    next(s for s in stages if s.id == "spcc").run()
+    assert any("mirrorx" in s and "M33_Linear" in s for s in scripts)  # single-panel flip + anchor
 
 
 def test_emission_stage_ids_include_mirrorx_and_no_spcc(tmp_path):
@@ -102,7 +121,7 @@ def test_spcc_stage_uses_local_gaia_paths_when_configured(tmp_path):
     cfg = Config.default()
     cfg.catalog_astro = "/g/astro.dat"; cfg.catalog_photo = "/g/xpsamp"
     scripts = []
-    stages = build_preprocess_stages("dso-mosaic", ws, cfg, resolve_target("M31"),
+    stages = build_preprocess_stages("dso-galaxy", ws, cfg, resolve_target("M31"),
                                      siril_exe="siril-cli", runner=_fake_runner_factory(scripts))
     spcc = next(s for s in stages if s.id == "spcc")
     spcc.run()
@@ -125,7 +144,7 @@ def test_spcc_stage_surfaces_online_fallback_and_imprecise_notes(tmp_path, capsy
             stderr = ""
         return R()
 
-    stages = build_preprocess_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+    stages = build_preprocess_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
                                      siril_exe="siril-cli", runner=fake_run)
     next(s for s in stages if s.id == "spcc").run()
     out = capsys.readouterr().out.lower()
@@ -144,7 +163,7 @@ def test_spcc_stage_quiet_when_no_warnings(tmp_path, capsys):
             stderr = ""
         return R()
 
-    stages = build_preprocess_stages("dso-mosaic", ws, Config.default(), resolve_target("M31"),
+    stages = build_preprocess_stages("dso-galaxy", ws, Config.default(), resolve_target("M31"),
                                      siril_exe="siril-cli", runner=fake_run)
     next(s for s in stages if s.id == "spcc").run()
     out = capsys.readouterr().out.lower()

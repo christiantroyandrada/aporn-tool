@@ -84,9 +84,19 @@ def _install_fakes(monkeypatch, tmp_path):
         fits_path.write_text("x", encoding="utf-8")
         return fits_path
 
+    def fake_run_composite_finish(clean_fits, out_stem, *, mode, starnet_exe, runner=None,
+                                  scratch_dir=None, params=None, star_strength=None, jpeg_quality=95):
+        # Composite (mosaic/emission/reflection) dual-layer finish: fabricate the four deliverables
+        # at the --out root so a full run reaches real files without StarNet/numpy.
+        for ext in ("fits", "tif", "png", "jpg"):
+            p = Path(f"{out_stem}.{ext}"); p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("x", encoding="utf-8")
+        return Path(f"{out_stem}.tif")
+
     monkeypatch.setattr(pp, "run_siril", fake_run_siril)
     monkeypatch.setattr(fin, "run_siril", fake_run_siril)
     monkeypatch.setattr(fin, "run_graxpert", fake_run_graxpert)
+    monkeypatch.setattr(fin, "run_composite_finish", fake_run_composite_finish)
 
 
 def test_emission_run_produces_final_deliverable(tmp_path, monkeypatch):
@@ -104,7 +114,7 @@ def test_mosaic_run_produces_final_deliverable(tmp_path, monkeypatch):
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out), "--target", "M31"])
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out), "--target", "M31"])
     assert code == 0
     assert (out / "M31_final.tif").exists()
 
@@ -123,7 +133,7 @@ def test_crop_and_no_crop_are_mutually_exclusive(tmp_path, capsys):
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out),
                  "--target", "M31", "--crop", "0 0 10 10", "--no-crop"])
     assert code == 1
     assert "mutually exclusive" in capsys.readouterr().out
@@ -132,9 +142,9 @@ def test_crop_and_no_crop_are_mutually_exclusive(tmp_path, capsys):
 def test_clean_flag_parses_and_defaults_false():
     from aporntool.cli import build_parser
     p = build_parser()
-    a = p.parse_args(["dso-mosaic", "--in", "x", "--out", "y", "--target", "M31", "--clean"])
+    a = p.parse_args(["dso-galaxy", "--in", "x", "--out", "y", "--target", "M31", "--clean"])
     assert a.clean is True
-    b = p.parse_args(["dso-mosaic", "--in", "x", "--out", "y", "--target", "M31"])
+    b = p.parse_args(["dso-galaxy", "--in", "x", "--out", "y", "--target", "M31"])
     assert b.clean is False
 
 
@@ -144,7 +154,7 @@ def test_clean_flag_removes_work_keeps_anchor(tmp_path, monkeypatch):
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out),
                  "--target", "M31", "--clean"])
     assert code == 0
     work = out / "_work" / "M31"
@@ -164,7 +174,7 @@ def test_without_clean_flag_all_work_is_retained(tmp_path, monkeypatch):
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out), "--target", "M31"])
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out), "--target", "M31"])
     assert code == 0
     work = out / "_work" / "M31"
     assert (work / "01_process").exists()                         # retained by default
@@ -187,7 +197,7 @@ def test_target_autodetected_from_header_when_omitted(tmp_path, monkeypatch):
     subs = tmp_path / "subs"; subs.mkdir()
     _write_real_sub(subs / "Light_0001.fit", "M 31", 11.25, 41.4)
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out)])
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out)])
     assert code == 0
     assert (out / "M31_final.tif").exists()
 
@@ -197,7 +207,7 @@ def test_out_defaults_beside_input_when_omitted(tmp_path, monkeypatch):
     _install_fakes(monkeypatch, tmp_path)
     subs = tmp_path / "data" / "subs"; subs.mkdir(parents=True)
     _write_real_sub(subs / "Light_0001.fit", "M 31", 11.25, 41.4)
-    code = main(["dso-mosaic", "--in", str(subs)])
+    code = main(["dso-galaxy", "--in", str(subs)])
     assert code == 0
     assert (subs.parent / "M31" / "M31_final.tif").exists()
 
@@ -205,7 +215,7 @@ def test_out_defaults_beside_input_when_omitted(tmp_path, monkeypatch):
 def test_coords_flag_is_removed(tmp_path):
     from aporntool.cli import build_parser
     with __import__("pytest").raises(SystemExit):
-        build_parser().parse_args(["dso-mosaic", "--in", "x", "--coords", "1,2"])
+        build_parser().parse_args(["dso-galaxy", "--in", "x", "--coords", "1,2"])
 
 
 def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
@@ -220,7 +230,7 @@ def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
     subs = tmp_path / "subs"; subs.mkdir()
     (subs / "Light_0001.fit").write_bytes(b"x")
     out = tmp_path / "out"
-    code = main(["dso-mosaic", "--in", str(subs), "--out", str(out),
+    code = main(["dso-galaxy", "--in", str(subs), "--out", str(out),
                  "--target", "M31", "--clean"])
     assert code == 1
     work = out / "_work" / "M31"

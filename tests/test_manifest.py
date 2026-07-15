@@ -4,7 +4,7 @@ from aporntool.manifest import (
 
 
 def _demo():
-    m = Manifest(mode="dso-mosaic", target="M31",
+    m = Manifest(mode="dso-galaxy", target="M31",
                  order=["stage", "register", "stack", "spcc", "crop", "finish"])
     return m
 
@@ -48,7 +48,7 @@ def test_manifest_roundtrip(tmp_path):
     p = tmp_path / "aporntool.json"
     save_manifest(m, p)
     loaded = load_manifest(p)
-    assert loaded.mode == "dso-mosaic"
+    assert loaded.mode == "dso-galaxy"
     assert loaded.input_fingerprint == "abc123"
     assert loaded.stage("stage").status == StageStatus.DONE.value
     assert loaded.stage("stage").outputs == ["x.fit"]

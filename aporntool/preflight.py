@@ -11,18 +11,19 @@ class CheckResult:
     remediation: str = ""     # what the user should do; empty when ok
 
 
-# Which external binaries each mode needs (emission/cluster stay on SIRIL only).
+# Which external binaries each mode needs. All composite modes (galaxy/emission/reflection) call the
+# StarNet2 CLI directly; only star-cluster keeps all its stars and needs no StarNet.
 MODE_TOOLS = {
-    "dso-mosaic": ["siril", "graxpert", "starnet2"],
-    "dso-emission-nebula": ["siril"],
+    "dso-galaxy": ["siril", "graxpert", "starnet2"],
+    "dso-emission-nebula": ["siril", "starnet2"],
     "dso-reflection-nebula": ["siril", "graxpert", "starnet2"],
     "dso-star-cluster": ["siril"],
 }
 # Only these modes run GraXpert, so only they need its AI models present.
-MODE_NEEDS_GRAXPERT = {"dso-mosaic", "dso-reflection-nebula"}
-# Only the mosaic finish uses SIRIL's built-in `starnet` command (reflection calls the StarNet2
-# CLI directly), so only mosaic needs StarNet configured *inside* SIRIL.
-MODE_NEEDS_SIRIL_STARNET = {"dso-mosaic"}
+MODE_NEEDS_GRAXPERT = {"dso-galaxy", "dso-reflection-nebula"}
+# No mode uses SIRIL's built-in `starnet` command any more — every star pass goes through the
+# StarNet2 CLI directly (the composite finish), so nothing needs StarNet configured *inside* SIRIL.
+MODE_NEEDS_SIRIL_STARNET = set()
 
 
 _TOOL_HELP = {
