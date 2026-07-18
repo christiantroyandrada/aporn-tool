@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _FIT_SUFFIXES = (".fit", ".fits")
+# Wide-field (dso-milky-way) ingests already-debayered camera/phone stills instead of raw FITS.
+# All of these are formats SIRIL's `convert` reads natively (JPEG/PNG/TIFF/HEIF).
+_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic")
 
 
 @dataclass
@@ -97,28 +100,58 @@ def _freed_bytes(path) -> int:
     return total
 
 
-def iter_fits(folder) -> list:
-    # Only real FITS subs — Seestar folders also hold .jpg + _thn.jpg that SIRIL would wrongly ingest.
+def _iter_suffixed(folder, suffixes) -> list:
     out = []
     for f in sorted(Path(folder).iterdir()):
-        if f.is_file() and f.suffix.lower() in _FIT_SUFFIXES:
+        if f.is_file() and f.suffix.lower() in suffixes:
             out.append(f)
     return out
+
+
+def iter_fits(folder) -> list:
+    # Only real FITS subs — Seestar folders also hold .jpg + _thn.jpg that SIRIL would wrongly ingest.
+    return _iter_suffixed(folder, _FIT_SUFFIXES)
 
 
 def count_fits(folder) -> int:
     return len(iter_fits(folder))
 
 
+def iter_images(folder) -> list:
+    # Wide-field stills (JPEG/HEIC/PNG/TIFF) for dso-milky-way. Skip our OWN deliverables (a prior
+    # run's <TARGET>_final.jpg/png/tif) and thumbnail sidecars (_thn) so pointing --in at a folder
+    # that already holds outputs can't restack them into the result — the FITS path guards the same way.
+    out = []
+    for f in _iter_suffixed(folder, _IMAGE_SUFFIXES):
+        stem = f.stem.lower()
+        if stem.endswith("_final") or stem.endswith("_thn"):
+            continue
+        out.append(f)
+    return out
+
+
+def count_images(folder) -> int:
+    return len(iter_images(folder))
+
+
 def stage_fits(sources, dest) -> int:
     # Bring every .fit from each source into one clean lights dir. Hardlink (instant, no extra
     # disk); fall back to a copy across drives/filesystems that can't hardlink.
+    return _stage(sources, dest, iter_fits)
+
+
+def stage_images(sources, dest) -> int:
+    # Same collision-safe hardlink staging as stage_fits, for wide-field stills.
+    return _stage(sources, dest, iter_images)
+
+
+def _stage(sources, dest, iterfn) -> int:
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     staged = 0
     renamed = 0
     for i, src in enumerate(sources):
-        for f in iter_fits(src):
+        for f in iterfn(src):
             target = dest / f.name
             if target.exists():
                 # Same file already staged (idempotent re-run) → skip, don't recount.

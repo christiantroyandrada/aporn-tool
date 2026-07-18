@@ -5,7 +5,7 @@ default below equals the value used before centralisation, so with no config the
 identical.
 """
 from aporntool.config import (
-    MosaicFinishParams, EmissionFinishParams, ClusterFinishParams,
+    MosaicFinishParams, EmissionFinishParams, ClusterFinishParams, MilkyWayFinishParams,
 )
 from aporntool.tools.siril import _g
 
@@ -36,6 +36,19 @@ def mosaic_finish_cmds(clean_name, out_name, *, star_reduce=None, params=None, j
         f"save {out_name}_starless",
         # Blend a fraction of the stars back (full removal looks AI-generated, #10).
         f'pm "${out_name}_starless$+$starmask_{out_name}_stretched$*{_g(sr)}"',
+    ] + deliverable_save_cmds(out_name, jpeg_quality)
+
+
+def milkyway_finish_cmds(clean_name, out_name, *, params=None, jpeg_quality=95) -> list:
+    # Wide-field Milky Way finish. GraXpert has already removed the light-pollution gradient and
+    # denoised, so here we only stretch, neutralise skyglow, and gently saturate before saving.
+    # No StarNet (the stars ARE the subject) and no SPCC (no plate solve at a ~24mm phone field).
+    p = params or MilkyWayFinishParams()
+    return [
+        f"load {clean_name}",
+        f"autostretch -linked {_g(p.autostretch_clip)} {_g(p.autostretch_bg)}",
+        f"rmgreen {_g(p.rmgreen)}",
+        f"satu {_g(p.satu)} {_g(p.satu_bg)}",
     ] + deliverable_save_cmds(out_name, jpeg_quality)
 
 

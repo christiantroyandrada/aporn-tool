@@ -10,8 +10,15 @@ from dataclasses import dataclass
 
 from astropy.io import fits
 
-from aporntool.catalog import resolve_target
+from aporntool.catalog import Target, resolve_target
 from aporntool.workspace import iter_fits
+
+
+def resolve_target_wide(name_arg):
+    # Wide-field (dso-milky-way) stills carry no FITS OBJECT/RA/DEC, and the mode never plate-solves,
+    # so there is nothing to look up: just name the run. --target overrides the default "MilkyWay".
+    # ra/dec are unused (no platesolve/SPCC in wide-field) but Target requires them.
+    return Target((name_arg or "MilkyWay").strip(), 0.0, 0.0, "milky-way", "wide-field")
 
 # Seestar S30 field of view (degrees): 150 mm focal, IMX662 sensor → ~1.29° x 0.73°.
 SEESTAR_FOV_DEG = (1.29, 0.73)

@@ -33,6 +33,21 @@ def convert_and_calibrate_cmds() -> list:
     ]
 
 
+def convert_cmds() -> list:
+    # Wide-field (dso-milky-way): phone/camera stills are already debayered 8-bit RGB, so there is
+    # nothing to calibrate — just transcode them to a FITS sequence named `pp_light` so the shared
+    # register/stack steps (which reference pp_light) work unchanged.
+    return ["convert pp_light -out=../01_process"]
+
+
+def wide_register_cmds() -> list:
+    # Wide-field: single-pass global star registration (no roundness cull). Phone/camera frames vary
+    # a lot in star quality frame-to-frame, and the DSO 2-pass + `-filter-round` cull can drop the
+    # reference frame and abort seqapplyreg — we want to keep every frame that aligns anyway. One-pass
+    # `register` both aligns AND applies, writing r_pp_light directly (no separate seqapplyreg step).
+    return ["register pp_light"]
+
+
 def register_cmds(mode: str, is_mosaic: bool, stack=None) -> list:
     # Registration depends on the ASSEMBLY (mosaic vs single), not the target type — except that
     # star clusters also cull the worst FWHM (tight round stars are the whole point there).
@@ -83,16 +98,28 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is
                          log_path=ws.logs / f"{stage_id}.log")
 
     stages = []
+    is_wide = mode == "dso-milky-way"
 
-    # convert+calibrate: link staged lights and debayer in a single SIRIL session
-    # (SIRIL 1.4.3 link -out= doesn't write a .seq, so calibrate must share the process).
-    stages.append(Stage(
-        "calibrate",
-        lambda: _run("calibrate", convert_and_calibrate_cmds(), cd=str(ws.lights)),
-        lambda: (proc / "pp_light_.seq").exists()))
+    if not is_wide:
+        # convert+calibrate: link staged lights and debayer in a single SIRIL session
+        # (SIRIL 1.4.3 link -out= doesn't write a .seq, so calibrate must share the process).
+        stages.append(Stage(
+            "calibrate",
+            lambda: _run("calibrate", convert_and_calibrate_cmds(), cd=str(ws.lights)),
+            lambda: (proc / "pp_light_.seq").exists()))
 
     # register: WCS (mosaic) or 2-pass (single-panel), then apply registration.
-    if is_mosaic:
+    if is_wide:
+        # Wide-field has no separate calibrate stage: transcode the stills AND register in ONE SIRIL
+        # session. `convert -out=` (like `link -out=`) does NOT persist a .seq, so the sequence must
+        # be consumed in the same process that created it (same reason calibrate absorbs `link`).
+        def _wide_register():
+            _run("register",
+                 convert_cmds() + ["cd ../01_process"] + wide_register_cmds(),
+                 cd=str(ws.lights))
+        stages.append(Stage("register", _wide_register,
+                            lambda: (proc / "r_pp_light_.seq").exists()))
+    elif is_mosaic:
         # seqplatesolve has a known false-negative in SIRIL 1.4 (reports failure even when every
         # frame solved), which aborts the script before seqapplyreg. Work around by running them
         # in separate SIRIL processes within a single stage.
@@ -115,7 +142,13 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is
         lambda: _run("stack", stack_cmds(is_mosaic, cfg.pipeline.stack), cd=str(proc)),
         lambda: (proc / "result.fit").exists()))
 
-    if needs_mirrorx(is_mosaic) and not spcc_in_preprocess(mode):
+    if is_wide:
+        # Wide-field: no Seestar flip (a phone/camera isn't mirrored) and no SPCC — just save the
+        # stacked result as the golden anchor for the finish phase.
+        def _anchor_run():
+            _run("anchor", ["load result", f"save {anchor_noext}", "close"], cd=str(proc))
+        stages.append(Stage("anchor", _anchor_run, lambda: _nonzero(anchor)))
+    elif needs_mirrorx(is_mosaic) and not spcc_in_preprocess(mode):
         # mirrorx: undo the Seestar vertical flip and save the golden anchor.
         # (Emission/star-cluster — no SPCC in preprocess, so this is the final preprocess stage.)
         def _mirrorx_run():

@@ -7,8 +7,10 @@ from pathlib import Path
 import aporntool
 from aporntool.discovery import discover_tool
 from aporntool.config import Config, load_config, save_config
-from aporntool.detect import resolve_target_auto, detect_mosaic
-from aporntool.workspace import Workspace, stage_fits, count_fits, iter_fits
+from aporntool.detect import resolve_target_auto, resolve_target_wide, detect_mosaic
+from aporntool.workspace import (
+    Workspace, stage_fits, count_fits, iter_fits, stage_images, count_images, iter_images,
+)
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
 from aporntool.paths import sanitize_dropped_path, to_input_dir
@@ -18,6 +20,9 @@ from aporntool.stages.finish import build_finish_stages
 from aporntool.stages.engine import run_pipeline
 
 DSO_MODES = ["dso-galaxy", "dso-emission-nebula", "dso-reflection-nebula", "dso-star-cluster"]
+# Wide-field modes ingest camera/phone stills (JPEG/HEIC/PNG/TIFF), not raw FITS subs.
+WIDE_MODES = ["dso-milky-way"]
+MODES = DSO_MODES + WIDE_MODES
 ALL_TOOLS = ["siril", "graxpert", "starnet2", "ffmpeg"]
 
 
@@ -37,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--out", required=True)
     p_status.add_argument("--target", required=True)
 
-    for mode in DSO_MODES:
+    for mode in MODES:
         pm = sub.add_parser(mode, help=f"process a {mode} target")
         pm.add_argument("--in", dest="inputs", action="append", required=True,
                         help="subs folder (repeatable for multi-night)")
@@ -204,8 +209,13 @@ def cmd_mode(args, mode: str) -> int:
             print(f"ERROR: input folder does not exist: {d}")
             return 1
     try:
-        # --target/--coords are optional: fall back to the subs' FITS OBJECT + RA/DEC header.
-        target = resolve_target_auto(args.target, in_dirs[0])
+        if mode in WIDE_MODES:
+            # Wide-field stills have no FITS OBJECT header and the mode never plate-solves, so just
+            # name the run ("MilkyWay" by default; --target overrides).
+            target = resolve_target_wide(args.target)
+        else:
+            # --target/--coords are optional: fall back to the subs' FITS OBJECT + RA/DEC header.
+            target = resolve_target_auto(args.target, in_dirs[0])
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}")
         return 1
@@ -240,13 +250,28 @@ def cmd_mode(args, mode: str) -> int:
         return 0
 
     ws.create()
-    staged = stage_fits(in_dirs, ws.lights)
-    print(f"Staged {staged} subs into {ws.lights}")
-    if count_fits(ws.lights) < 1:
-        print("ERROR: No .fit or .fits sub-exposure files found in the given folder(s).\n"
-              "  Make sure --in points to the folder containing your raw FITS frames\n"
-              "  (e.g. the 'lights' folder from your telescope).")
+    if mode in WIDE_MODES:
+        staged = stage_images(in_dirs, ws.lights)
+        n_staged = count_images(ws.lights)
+    else:
+        staged = stage_fits(in_dirs, ws.lights)
+        n_staged = count_fits(ws.lights)
+    print(f"Staged {staged} frames into {ws.lights}")
+    if n_staged < 1:
+        if mode in WIDE_MODES:
+            print("ERROR: No image frames found in the given folder(s).\n"
+                  "  dso-milky-way reads camera/phone stills: .jpg .jpeg .png .tif .tiff .heic\n"
+                  "  Make sure --in points to the folder holding your Milky Way frames.")
+        else:
+            print("ERROR: No .fit or .fits sub-exposure files found in the given folder(s).\n"
+                  "  Make sure --in points to the folder containing your raw FITS frames\n"
+                  "  (e.g. the 'lights' folder from your telescope).")
         return 1
+    if mode in WIDE_MODES and any(f.suffix.lower() == ".heic" for f in iter_images(ws.lights)):
+        # HEIC (iPhone's default) only decodes if SIRIL was built with libheif — most current builds
+        # are, but flag it up front so a decode failure isn't misread as "too few stars" mid-run.
+        print("  note: HEIC frames detected. SIRIL decodes these only if built with HEIF support "
+              "(most current builds are). If registration reports no frames, export to JPEG/TIFF first.")
 
     # Build the FULL pipeline (preprocess → finish) up front so resume spans the whole run.
     siril = _resolve_tool(cfg, "siril")
@@ -258,12 +283,13 @@ def cmd_mode(args, mode: str) -> int:
     # Mosaic vs single-panel is a capture attribute (orthogonal to target type). Only galaxies can
     # be mosaics for now; auto-detect from the subs' pointing spread unless --mosaic/--single forces
     # it. Always print the decision so the user can confirm or override (never a silent guess).
-    is_mosaic = _resolve_assembly(mode, in_dirs[0], args)
+    is_mosaic = False if mode in WIDE_MODES else _resolve_assembly(mode, in_dirs[0], args)
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril, is_mosaic=is_mosaic)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]
-    fp = input_fingerprint(iter_fits(ws.lights))
+    lights = iter_images(ws.lights) if mode in WIDE_MODES else iter_fits(ws.lights)
+    fp = input_fingerprint(lights)
     # Resume from the on-disk manifest when it still matches (mode/order/fingerprint); else fresh.
     if ws.manifest_path.exists():
         m = load_manifest(ws.manifest_path)
@@ -310,7 +336,7 @@ def main(argv=None) -> int:
         return cmd_config(args)
     if args.command == "status":
         return cmd_status(args)
-    if args.command in DSO_MODES:
+    if args.command in MODES:
         return cmd_mode(args, args.command)
     parser.print_help()
     return 1

@@ -94,6 +94,25 @@ class ReflectionFinishParams:
 
 
 @dataclass
+class MilkyWayFinishParams:
+    # Wide-field cellphone/camera Milky Way finish. GraXpert removes the light-pollution gradient
+    # and denoises; SIRIL then stretches + gently saturates. No StarNet (the stars ARE the subject)
+    # and no SPCC (no plate solve at a ~24mm phone field).
+    # NOTE: bge_smoothing/bge_correction/denoise_strength are DELIBERATELY duplicated from
+    # GraxpertParams (not shared) because wide-field needs very different values — a high BGE
+    # smoothing so the large-scale Milky Way band isn't fitted and subtracted as "background",
+    # unlike the DSO default of 0.0. Tune these under pipeline.milkyway_finish, not pipeline.graxpert.
+    bge_smoothing: float = 1.0        # HIGH on purpose: keep GraXpert BGE from eating the MW band
+    bge_correction: str = "Subtraction"
+    denoise_strength: float = 0.8
+    autostretch_clip: float = -2.5    # `autostretch -linked <clip> <bg>`
+    autostretch_bg: float = 0.20
+    rmgreen: float = 1.0              # neutralise skyglow green cast
+    satu: float = 0.5                 # gentle saturation (phone colour is already processed)
+    satu_bg: float = 0.1
+
+
+@dataclass
 class PipelineParams:
     stack: StackParams = field(default_factory=StackParams)
     graxpert: GraxpertParams = field(default_factory=GraxpertParams)
@@ -103,6 +122,7 @@ class PipelineParams:
     emission_finish: EmissionFinishParams = field(default_factory=EmissionFinishParams)
     cluster_finish: ClusterFinishParams = field(default_factory=ClusterFinishParams)
     reflection_finish: ReflectionFinishParams = field(default_factory=ReflectionFinishParams)
+    milkyway_finish: MilkyWayFinishParams = field(default_factory=MilkyWayFinishParams)
     jpeg_quality: int = 95            # deliverable .jpg quality, all modes
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from aporntool.stages.engine import Stage
 from aporntool.tools.siril import build_ssf, write_ssf, run_siril, spcc_cmd, gaia_catalog_cmds
 from aporntool.tools.graxpert import bge_cmd, denoise_cmd, run_graxpert
-from aporntool.stages.finish_cmds import crop_cmds, cluster_finish_cmds
+from aporntool.stages.finish_cmds import crop_cmds, cluster_finish_cmds, milkyway_finish_cmds
 from aporntool.stages.composite_finish import run_composite_finish
 from aporntool.stages.reflection_finish import run_reflection_finish
 from aporntool.stages.crop import resolve_crop
@@ -150,6 +150,39 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                                   runner=runner, scratch_dir=ws.finish,
                                   params=asdict(cfg.pipeline.reflection_finish),
                                   jpeg_quality=cfg.pipeline.jpeg_quality)
+        stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
+
+    elif mode == "dso-milky-way":
+        cropped = ws.linear / f"{ws.target}_cropped"
+        bge_out = ws.graxpert / f"{ws.target}_bge"
+        clean = ws.graxpert / f"{ws.target}_clean"
+        mw = cfg.pipeline.milkyway_finish
+        # bge: crop (SIRIL, trims the rotation-blurred registration border) then GraXpert BGE. High
+        # bge_smoothing keeps the large-scale Milky Way band from being subtracted as "background".
+        def _bge():
+            box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
+            _siril("crop", [f"load {anchor.as_posix()}",
+                            *( [f"crop {box}"] if box else [] ),
+                            f"save {cropped.as_posix()}", "close"], cd=str(ws.linear))
+            run_graxpert(bge_cmd(graxpert_exe, f"{cropped.as_posix()}.fit",
+                                 str(bge_out), gpu=True, smoothing=mw.bge_smoothing,
+                                 correction=mw.bge_correction),
+                         bge_out, runner=runner, settle=3.0)
+        stages.append(Stage("bge", _bge, lambda: _nonzero(f"{bge_out}.fits")))
+
+        def _denoise():
+            run_graxpert(denoise_cmd(graxpert_exe, f"{bge_out}.fits", str(clean),
+                                     gpu=True, strength=mw.denoise_strength),
+                         clean, runner=runner, settle=3.0)
+        stages.append(Stage("denoise", _denoise, lambda: _nonzero(f"{clean}.fits")))
+
+        def _finish():
+            # No StarNet (stars are the subject) and no SPCC (no plate solve at a phone field): just
+            # stretch + gentle colour on the GraXpert-cleaned linear, then save the four deliverables.
+            _siril("finish", milkyway_finish_cmds(f"{clean.as_posix()}.fits", out_name,
+                                                  params=mw, jpeg_quality=cfg.pipeline.jpeg_quality),
+                   cd=str(ws.linear))
+            _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     return stages

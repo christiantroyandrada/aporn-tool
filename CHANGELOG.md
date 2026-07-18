@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.6.0 — unreleased
+
+### Added
+- **New `dso-milky-way` mode: wide-field Milky Way from a phone or camera.** It ingests already-
+  debayered **stills** (`.jpg .jpeg .png .tif .tiff .heic`) instead of raw FITS subs — point a phone
+  on anything steady at the Milky Way, take a dozen-plus frames, and it stacks them to pull the
+  galactic core out of the noise. Mirrors how the Seestar (and smart cameras like the S30 Pro /
+  Dwarf 3) separate a wide Milky Way mode from telescope captures.
+  - **Pipeline:** `register → stack → anchor → bge → denoise → finish`. Because phone stills are
+    already RGB and carry no WCS, the mode **skips calibration, plate-solving, SPCC, and the mirrorx
+    flip**. `convert` is merged into the register stage (SIRIL `convert -out=` doesn't persist a
+    `.seq`, same gotcha as `link -out=`). Registration is **single-pass global** with no roundness
+    cull — phone frames vary too much frame-to-frame, and the DSO 2-pass `-filter-round` cull could
+    drop the reference frame and abort. GraXpert BGE runs at **high smoothing** so the large-scale
+    Milky Way band isn't subtracted as background. No StarNet (the stars are the subject).
+  - **Dependencies:** SIRIL + GraXpert only (no StarNet, no Gaia catalog).
+  - **Config:** new `pipeline.milkyway_finish` block (BGE smoothing, denoise, stretch, saturation).
+  - `--target` is optional (the run is named `MilkyWay`); `--out` still defaults beside the input.
+
 ## v0.5.0 — 2026-07-15
 
 ### Changed (breaking)

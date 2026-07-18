@@ -18,9 +18,11 @@ MODE_TOOLS = {
     "dso-emission-nebula": ["siril", "starnet2"],
     "dso-reflection-nebula": ["siril", "graxpert", "starnet2"],
     "dso-star-cluster": ["siril"],
+    # Wide-field Milky Way keeps all its stars (no StarNet); GraXpert handles gradient + denoise.
+    "dso-milky-way": ["siril", "graxpert"],
 }
 # Only these modes run GraXpert, so only they need its AI models present.
-MODE_NEEDS_GRAXPERT = {"dso-galaxy", "dso-reflection-nebula"}
+MODE_NEEDS_GRAXPERT = {"dso-galaxy", "dso-reflection-nebula", "dso-milky-way"}
 # No mode uses SIRIL's built-in `starnet` command any more — every star pass goes through the
 # StarNet2 CLI directly (the composite finish), so nothing needs StarNet configured *inside* SIRIL.
 MODE_NEEDS_SIRIL_STARNET = set()

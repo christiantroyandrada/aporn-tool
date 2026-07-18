@@ -59,6 +59,12 @@ raw .fit subs ──► stage ──► SIRIL: calibrate ─► register ─► 
 | `dso-emission-nebula` | Hα HII / SNRs - M8, M20, M42, M16, Veil | star-based 2-pass | SIRIL `subsky` | keep all (rich field) |
 | `dso-reflection-nebula` | blue scattered light - VdB106, M78 | star-based 2-pass | GraXpert BGE | dual-layer screen blend |
 | `dso-star-cluster` | globulars & open clusters - M13, M22, M45, M44 | 2-pass (+FWHM cull) | SIRIL `subsky` | **keep all, stars are the subject** |
+| `dso-milky-way` | **wide-field Milky Way from a phone/camera** (JPEG/HEIC/PNG/TIFF stills, not FITS) | single-pass global (no cull) | GraXpert BGE (high smoothing) | **keep all, stars are the subject** |
+
+`dso-milky-way` is the odd one out: it ingests already-processed camera **stills** instead of raw
+FITS subs, so it skips calibration, plate-solving, and SPCC. Put your phone on anything steady, take
+a dozen-plus frames of the same patch of sky, and it stacks them to pull the galactic core out of the
+noise. See [the Milky Way section](#2b-wide-field-milky-way-from-a-phone) below.
 
 Planetary (video → AutoStakkert → finish) is planned; it requires a manual GUI stacking step.
 
@@ -182,6 +188,29 @@ aporn-tool dso-reflection-nebula --in "/data/M78"
 aporn-tool dso-star-cluster      --in "/data/M13"
 ```
 
+### 2b. Wide-field Milky Way from a phone
+
+`dso-milky-way` takes a folder of camera/phone **stills** (`.jpg .jpeg .png .tif .tiff .heic`) instead
+of FITS subs — no `--target` needed (the run is just named `MilkyWay`):
+
+```bash
+aporn-tool dso-milky-way --in "/path/to/phone shots"
+```
+
+How to shoot for it: prop the phone on something steady (a tripod, a ledge, a bag), point at the
+Milky Way, and take a dozen or more frames of the **same** framing (Night Mode or a long-exposure app
+gives the most signal). The tool aligns on the stars, so a fixed foreground (rooftops, trees) will
+blur as the sky rotates — that's expected; the payoff is a much cleaner, more detailed galactic core.
+More frames = less noise. Needs SIRIL + GraXpert (no StarNet, no Gaia catalog).
+
+Two practical notes:
+- **Output path with spaces:** phone shots often live under a spaced path (e.g. `~/Pictures/Milky Way`),
+  and the default `--out` lands beside them, which SIRIL can't handle. Pass an explicit space-free
+  `--out`, e.g. `--out ~/Pictures/mw_out`.
+- **HEIC (iPhone default):** supported only if your SIRIL was built with HEIF support (most current
+  builds are). The tool prints a heads-up when it sees `.heic`; if registration finds no frames,
+  export the frames to JPEG or TIFF and re-run.
+
 ### 3. Combine multiple nights (more integration = the #1 quality lever)
 
 `--in` is repeatable; all `.fit` from every source are staged and stacked together:
@@ -276,7 +305,8 @@ aporn-tool <command> [options]
 
 | Command | Purpose |
 |---------|---------|
-| `dso-galaxy`, `dso-emission-nebula`, `dso-reflection-nebula`, `dso-star-cluster` | process a target |
+| `dso-galaxy`, `dso-emission-nebula`, `dso-reflection-nebula`, `dso-star-cluster` | process a deep-sky target (FITS subs) |
+| `dso-milky-way` | stack a wide-field Milky Way from phone/camera stills (JPEG/HEIC/PNG/TIFF) |
 | `config --check [--config PATH]` | show tool discovery; write a starter config |
 | `status --out PATH --target NAME` | print the resume ledger |
 | `--version` | print the version |
@@ -314,6 +344,7 @@ Stage names are **per-mode**. Run `aporn-tool status` to see yours. Current orde
 | `dso-reflection-nebula` | `calibrate → register → stack → spcc → bge → denoise → finish` |
 | `dso-emission-nebula` | `calibrate → register → stack → mirrorx → finish` |
 | `dso-star-cluster` | `calibrate → register → stack → mirrorx → finish` |
+| `dso-milky-way` | `register → stack → anchor → bge → denoise → finish` (convert is merged into register; no calibrate/mirrorx/SPCC) |
 
 A stage is only marked `done` after its output is verified (exists, non-empty, right type). A
 crash or a raising stage is marked `failed` and reported with the log tail. Re-run to resume.
