@@ -6,6 +6,7 @@ dist/
 build/
 .venv/
 .superpowers/
+.DS_Store
 aporntool.config.json
 _test_out/
 .claude/
