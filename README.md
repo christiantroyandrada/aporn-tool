@@ -211,6 +211,31 @@ Two practical notes:
   builds are). The tool prints a heads-up when it sees `.heic`; if registration finds no frames,
   export the frames to JPEG or TIFF and re-run.
 
+### 2c. DSLR / mirrorless DSO (FITS-less)
+
+The four DSO modes also take DSLR/mirrorless lights — **raw** (`.cr2 .cr3 .nef .arw .dng .raf …`),
+TIFF, or JPEG — no FITS required. Point `--in` at your lights and pass calibration frames as folders:
+
+```bash
+aporn-tool dso-galaxy \
+  --in    "/data/M31/lights" \
+  --darks "/data/M31/darks" \
+  --flats "/data/M31/flats" \
+  --bias  "/data/M31/bias" \
+  --target M31 --focal 530 --pixel 3.76 --out /data/M31_out
+```
+
+Notes:
+- A folder is read as **one** format (priority FITS > raw > TIFF > JPEG), so raw + in-camera JPEG
+  pairs just work — the JPEGs are ignored.
+- Master **darks/flats/bias** are optional and applied when given (a `masters` stage builds them).
+- `--target` is required (raw has no `OBJECT` header); pass `--coords RA,DEC` for a target not in the
+  built-in catalog. Raw/FITS get debayered; TIFF/JPEG are treated as already-RGB.
+- `--focal`/`--pixel` set the plate-solve geometry for the SPCC in **galaxy/reflection** (SPCC runs in
+  preprocess there). Emission/star-cluster solve blind in the finish phase, so those two don't use
+  `--focal`/`--pixel` yet; SPCC may not calibrate DSLR emission/cluster colour without a catalog target.
+- Master **darks/flats/bias** also work for cooled **astro-camera FITS** lights, not just DSLR raw.
+
 ### 3. Combine multiple nights (more integration = the #1 quality lever)
 
 `--in` is repeatable; all `.fit` from every source are staged and stacked together:
@@ -321,6 +346,11 @@ aporn-tool <command> [options]
 | `--crop "X Y W H"` | explicit SIRIL crop box (default: auto-crop) |
 | `--no-crop` | disable auto-crop; keep the full frame |
 | `--star-reduce F` | mosaic star blend-back fraction (default 0.5) |
+| `--darks PATH` | folder of dark frames (DSLR calibration; DSO modes) |
+| `--flats PATH` | folder of flat frames (DSLR calibration; DSO modes) |
+| `--bias PATH` | folder of bias/offset frames (DSLR calibration; DSO modes) |
+| `--focal MM` | focal length (mm) for the SPCC plate solve (DSLR; default: Seestar) |
+| `--pixel UM` | pixel size (microns) for the SPCC plate solve (DSLR; default: Seestar) |
 | `--clean` | on success, delete working files except the golden anchor (reclaims disk) |
 | `--from STAGE` | restart at this stage |
 | `--redo STAGE` | re-run this stage + everything downstream |

@@ -18,6 +18,22 @@
   - **Dependencies:** SIRIL + GraXpert only (no StarNet, no Gaia catalog).
   - **Config:** new `pipeline.milkyway_finish` block (BGE smoothing, denoise, stretch, saturation).
   - `--target` is optional (the run is named `MilkyWay`); `--out` still defaults beside the input.
+- **DSLR / mirrorless DSO support — the existing modes no longer require FITS.** `dso-galaxy`,
+  `dso-emission-nebula`, `dso-reflection-nebula`, and `dso-star-cluster` now accept DSLR lights in
+  **raw** (`.cr2 .cr3 .nef .arw .dng .raf .orf .rw2 .pef .srw`), TIFF, or JPEG, with **full master
+  calibration**.
+  - **Ingest picks one format per folder** by priority (FITS > raw > TIFF > JPEG), so a Seestar sub
+    is never mixed with its `.jpg` preview, nor a DSLR raw with its in-camera JPEG. FITS is `link`ed
+    (unchanged); everything else is `convert`ed to FITS. Raw/FITS are debayered; TIFF/JPEG are treated
+    as already-RGB.
+  - **Master calibration:** `--darks`, `--flats`, `--bias` (each a folder). A new `masters` stage
+    builds master bias/dark (sigma-clip, `-nonorm`) and master flat (bias-subtract + `-norm=mul`),
+    then `calibrate` applies them (`-bias= -dark= -cc=dark -flat=`).
+  - **Optics:** `--focal` / `--pixel` set the plate-solve geometry for SPCC (defaults stay Seestar).
+    `--target` is required (raw frames carry no `OBJECT` header). DSLR frames are not vertically
+    flipped, so the mirrorx step is skipped for them.
+  - **Seestar path is byte-identical:** with FITS input and no calibration frames, every command is
+    exactly as before.
 
 ## v0.5.0 — 2026-07-15
 

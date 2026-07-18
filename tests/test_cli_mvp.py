@@ -212,10 +212,12 @@ def test_out_defaults_beside_input_when_omitted(tmp_path, monkeypatch):
     assert (subs.parent / "M31" / "M31_final.tif").exists()
 
 
-def test_coords_flag_is_removed(tmp_path):
+def test_coords_flag_accepted_for_dslr_targets(tmp_path):
+    # --coords was dropped once (Seestar auto-detects from the FITS header) but is back for DSLR:
+    # raw frames carry no OBJECT header, so a target not in the built-in catalog needs explicit coords.
     from aporntool.cli import build_parser
-    with __import__("pytest").raises(SystemExit):
-        build_parser().parse_args(["dso-galaxy", "--in", "x", "--coords", "1,2"])
+    args = build_parser().parse_args(["dso-galaxy", "--in", "x", "--coords", "1,2"])
+    assert args.coords == "1,2"
 
 
 def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):

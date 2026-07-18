@@ -8,6 +8,19 @@ _FIT_SUFFIXES = (".fit", ".fits")
 # Wide-field (dso-milky-way) ingests already-debayered camera/phone stills instead of raw FITS.
 # All of these are formats SIRIL's `convert` reads natively (JPEG/PNG/TIFF/HEIF).
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic")
+# DSLR/mirrorless raw formats SIRIL reads via libraw (Bayer/CFA — need debayering, like a Seestar sub).
+_RAW_SUFFIXES = (".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef", ".srw", ".raw")
+
+# For DSO ingest we accept FITS *or* DSLR frames, but a folder is treated as ONE format so we never
+# mix a Seestar sub with its preview .jpg, or a DSLR raw with its in-camera .jpg. Highest-priority
+# format present in the folder wins. `debayer` says whether the frames are still a CFA mosaic (raw
+# FITS / camera raw) vs already-debayered RGB (TIFF/JPEG exports).
+_LIGHT_GROUPS = (
+    ("fits", _FIT_SUFFIXES, True),
+    ("raw", _RAW_SUFFIXES, True),
+    ("tiff", (".tif", ".tiff"), False),
+    ("jpeg", (".jpg", ".jpeg", ".png"), False),
+)
 
 
 @dataclass
@@ -24,7 +37,19 @@ class Workspace:
         return self.work / "00_lights"
 
     @property
-    def process(self) -> Path:     # SIRIL sequences + calibrated/registered frames
+    def darks(self) -> Path:       # staged dark frames (DSLR calibration; empty for Seestar)
+        return self.work / "00_darks"
+
+    @property
+    def flats(self) -> Path:       # staged flat frames (DSLR calibration)
+        return self.work / "00_flats"
+
+    @property
+    def bias(self) -> Path:        # staged bias/offset frames (DSLR calibration)
+        return self.work / "00_bias"
+
+    @property
+    def process(self) -> Path:     # SIRIL sequences + calibrated/registered frames, incl. masters
         return self.work / "01_process"
 
     @property
@@ -69,7 +94,8 @@ class Workspace:
         # nothing and they are not counted). Safe to call repeatedly -- missing dirs are ignored.
         anchor = self.linear / f"{self.target}_Linear.fit"
         freed = 0
-        for d in (self.lights, self.process, self.graxpert, self.finish, self.previews):
+        for d in (self.lights, self.darks, self.flats, self.bias,
+                  self.process, self.graxpert, self.finish, self.previews):
             freed += _freed_bytes(d)
             shutil.rmtree(d, ignore_errors=True)
         if self.linear.exists():
@@ -108,6 +134,13 @@ def _iter_suffixed(folder, suffixes) -> list:
     return out
 
 
+def _is_sidecar(f) -> bool:
+    # Our OWN outputs, not capture frames: a prior run's <TARGET>_final.* deliverable or a _thn
+    # thumbnail. Excluded from ingest so pointing --in at a folder that holds outputs can't restack them.
+    stem = f.stem.lower()
+    return stem.endswith("_final") or stem.endswith("_thn")
+
+
 def iter_fits(folder) -> list:
     # Only real FITS subs — Seestar folders also hold .jpg + _thn.jpg that SIRIL would wrongly ingest.
     return _iter_suffixed(folder, _FIT_SUFFIXES)
@@ -118,16 +151,37 @@ def count_fits(folder) -> int:
 
 
 def iter_images(folder) -> list:
-    # Wide-field stills (JPEG/HEIC/PNG/TIFF) for dso-milky-way. Skip our OWN deliverables (a prior
-    # run's <TARGET>_final.jpg/png/tif) and thumbnail sidecars (_thn) so pointing --in at a folder
-    # that already holds outputs can't restack them into the result — the FITS path guards the same way.
-    out = []
-    for f in _iter_suffixed(folder, _IMAGE_SUFFIXES):
-        stem = f.stem.lower()
-        if stem.endswith("_final") or stem.endswith("_thn"):
-            continue
-        out.append(f)
-    return out
+    # Wide-field stills (JPEG/HEIC/PNG/TIFF) for dso-milky-way.
+    return [f for f in _iter_suffixed(folder, _IMAGE_SUFFIXES) if not _is_sidecar(f)]
+
+
+def detect_light_kind(folder):
+    # Which capture format dominates this folder, as (kind, needs_debayer). Highest-priority format
+    # present wins (FITS > raw > TIFF > JPEG) so one folder is never mixed (a Seestar sub with its
+    # .jpg preview, or a DSLR raw with its in-camera JPEG). (None, False) if no light frames.
+    files = [f for f in Path(folder).iterdir() if f.is_file() and not _is_sidecar(f)]
+    for kind, suffixes, debayer in _LIGHT_GROUPS:
+        if any(f.suffix.lower() in suffixes for f in files):
+            return kind, debayer
+    return None, False
+
+
+def iter_lights(folder) -> list:
+    # DSO light frames of the folder's dominant format (see detect_light_kind), sidecars excluded.
+    kind, _ = detect_light_kind(folder)
+    if kind is None:
+        return []
+    suffixes = next(s for k, s, _ in _LIGHT_GROUPS if k == kind)
+    return [f for f in _iter_suffixed(folder, suffixes) if not _is_sidecar(f)]
+
+
+def count_lights(folder) -> int:
+    return len(iter_lights(folder))
+
+
+def stage_lights(sources, dest) -> int:
+    # Stage the dominant-format light (or calibration) frames from each source into one dir.
+    return _stage(sources, dest, iter_lights)
 
 
 def count_images(folder) -> int:

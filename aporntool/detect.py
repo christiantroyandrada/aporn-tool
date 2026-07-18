@@ -102,15 +102,16 @@ def detect_mosaic(in_dir, *, fov_deg=SEESTAR_FOV_DEG, overlap_frac=0.5, max_samp
     return MosaicDetection(is_mosaic, ra_spread, dec_spread, len(ras), reason)
 
 
-def resolve_target_auto(name_arg, in_dir):
+def resolve_target_auto(name_arg, in_dir, coords_arg=None):
     # Resolve the Target for a run. An explicit --target wins for the NAME; otherwise the header's
-    # OBJECT names it. Coordinates come from the built-in catalog for known targets, else straight
-    # from the header's RA/DEC -- so the everyday command needs neither --target nor --coords.
+    # OBJECT names it. Coordinates come from --coords (DSLR frames with no header), else the built-in
+    # catalog for known targets, else the header's RA/DEC -- so the everyday command needs neither.
     obj, ra, dec = read_header_target(in_dir)
     name = name_arg or obj
     if not name:
         raise ValueError(
-            "Could not determine the target: no --target given and the first sub's FITS header has "
-            "no OBJECT keyword. Pass --target NAME.")
-    coords = f"{ra},{dec}" if (ra is not None and dec is not None) else None
+            "Could not determine the target: no --target given and the input has no FITS OBJECT "
+            "header (DSLR raw carries none). Pass --target NAME (and --coords RA,DEC if it is not a "
+            "known catalog target).")
+    coords = coords_arg or (f"{ra},{dec}" if (ra is not None and dec is not None) else None)
     return resolve_target(name, coords)

@@ -9,7 +9,8 @@ from aporntool.discovery import discover_tool
 from aporntool.config import Config, load_config, save_config
 from aporntool.detect import resolve_target_auto, resolve_target_wide, detect_mosaic
 from aporntool.workspace import (
-    Workspace, stage_fits, count_fits, iter_fits, stage_images, count_images, iter_images,
+    Workspace, stage_images, count_images, iter_images,
+    stage_lights, count_lights, iter_lights, detect_light_kind,
 )
 from aporntool.manifest import Manifest, input_fingerprint, load_manifest, save_manifest
 from aporntool.preflight import run_preflight, MODE_TOOLS
@@ -72,6 +73,19 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--clean", action="store_true",
                         help="on success, delete working files except the golden anchor "
                              "(reclaims disk; re-finish still works via --from bge/--from finish)")
+        if mode in DSO_MODES:
+            # DSLR/mirrorless calibration frames + optics (ignored for Seestar FITS, which needs none).
+            pm.add_argument("--darks", default=None, help="folder of dark frames (DSLR calibration)")
+            pm.add_argument("--flats", default=None, help="folder of flat frames (DSLR calibration)")
+            pm.add_argument("--bias", default=None,
+                            help="folder of bias/offset frames (DSLR calibration)")
+            pm.add_argument("--focal", type=float, default=None,
+                            help="focal length in mm for the SPCC plate solve (DSLR; default: Seestar)")
+            pm.add_argument("--pixel", type=float, default=None,
+                            help="pixel size in microns for the SPCC plate solve (DSLR; default: Seestar)")
+            pm.add_argument("--coords", default=None,
+                            help="target RA,DEC in decimal degrees, for a target not in the built-in "
+                                 "catalog (DSLR raw has no OBJECT header)")
     return parser
 
 
@@ -191,6 +205,79 @@ def _resolve_assembly(mode, in_dir, args) -> bool:
     return det.is_mosaic
 
 
+def _stage_inputs(mode, args, in_dirs, ws):
+    # Stage the light frames (+ DSLR calibration), detect the input format, and validate there's
+    # something to process. Returns (light_kind, light_debayer, cal, ok); prints its own errors and
+    # returns ok=False to abort. Keeps cmd_mode's happy path readable.
+    light_kind, light_debayer, cal = "fits", True, {}
+    if mode in WIDE_MODES:
+        staged = stage_images(in_dirs, ws.lights)
+        n_staged = count_images(ws.lights)
+    else:
+        staged = stage_lights(in_dirs, ws.lights)
+        n_staged = count_lights(ws.lights)
+        # Detect the format from what actually landed in 00_lights (not just in_dirs[0]), so a
+        # reused/mixed lights dir can't disagree with the pipeline that gets built for it.
+        light_kind, light_debayer = detect_light_kind(ws.lights)
+        formats = {detect_light_kind(d)[0] for d in in_dirs} - {None}
+        if len(formats) > 1:
+            print(f"  WARNING: mixed light formats across --in folders ({', '.join(sorted(formats))}); "
+                  f"only the '{light_kind}' frames will be stacked. Keep one format per run.")
+    print(f"Staged {staged} frames into {ws.lights}")
+    if n_staged < 1:
+        if mode in WIDE_MODES:
+            print("ERROR: No image frames found in the given folder(s).\n"
+                  "  dso-milky-way reads camera/phone stills: .jpg .jpeg .png .tif .tiff .heic\n"
+                  "  Make sure --in points to the folder holding your Milky Way frames.")
+        else:
+            print("ERROR: No light frames found in the given folder(s).\n"
+                  "  DSO modes read Seestar/telescope FITS subs OR DSLR stills\n"
+                  "  (.cr2 .cr3 .nef .arw .dng .raf ..., or .tif/.jpg exports).\n"
+                  "  Make sure --in points to the folder with your light frames.")
+        return light_kind, light_debayer, cal, False
+    if mode in WIDE_MODES and any(f.suffix.lower() == ".heic" for f in iter_images(ws.lights)):
+        # HEIC (iPhone's default) only decodes if SIRIL was built with libheif — most current builds
+        # are, but flag it up front so a decode failure isn't misread as "too few stars" mid-run.
+        print("  note: HEIC frames detected. SIRIL decodes these only if built with HEIF support "
+              "(most current builds are). If registration reports no frames, export to JPEG/TIFF first.")
+    if mode in DSO_MODES:
+        if light_kind and light_kind != "fits":
+            # DSLR/still input: convert (not link), debayer only if the frames are still a CFA mosaic.
+            print(f"  Input: DSLR/still frames ({light_kind}); "
+                  f"{'debayering' if light_debayer else 'already RGB'}.")
+        # Master-calibration frames — supported for FITS lights too (cooled astro cameras), not just raw.
+        cal, cal_ok = _stage_calibration_frames(args, ws)
+        if not cal_ok:
+            return light_kind, light_debayer, cal, False
+    return light_kind, light_debayer, cal, True
+
+
+def _stage_calibration_frames(args, ws):
+    # Stage the master-calibration sets (bias/dark/flat) the user passed, each into its own dir.
+    # Returns ({"bias"/"dark"/"flat": <detected format>} for the sets that had usable frames, ok).
+    # The per-set format lets a run mix formats (e.g. FITS lights with raw flats). ok=False (after
+    # printing) if a named folder is missing, so the caller can abort before compute.
+    cal = {}
+    for cal_key, arg_name, dest in (("bias", "bias", ws.bias),
+                                    ("dark", "darks", ws.darks),
+                                    ("flat", "flats", ws.flats)):
+        arg_val = getattr(args, arg_name, None)
+        if not arg_val:
+            continue
+        cdir = to_input_dir(sanitize_dropped_path(arg_val))
+        if not cdir.is_dir():
+            print(f"ERROR: --{arg_name} folder does not exist: {cdir}")
+            return cal, False
+        n_cal = stage_lights([cdir], dest)
+        if n_cal > 0:
+            kind, _ = detect_light_kind(dest)
+            cal[cal_key] = kind
+            print(f"  Staged {n_cal} {cal_key} frame(s) ({kind}) for calibration.")
+        else:
+            print(f"  note: --{arg_name} folder has no usable frames; skipping {cal_key} calibration.")
+    return cal, True
+
+
 def cmd_mode(args, mode: str) -> int:
     # Resolve inputs (drag-and-drop friendly), preflight the environment, then stage + run the
     # preprocess pipeline through to the golden anchor (finishing stages land in Plan 4).
@@ -215,7 +302,7 @@ def cmd_mode(args, mode: str) -> int:
             target = resolve_target_wide(args.target)
         else:
             # --target/--coords are optional: fall back to the subs' FITS OBJECT + RA/DEC header.
-            target = resolve_target_auto(args.target, in_dirs[0])
+            target = resolve_target_auto(args.target, in_dirs[0], getattr(args, "coords", None))
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}")
         return 1
@@ -250,28 +337,9 @@ def cmd_mode(args, mode: str) -> int:
         return 0
 
     ws.create()
-    if mode in WIDE_MODES:
-        staged = stage_images(in_dirs, ws.lights)
-        n_staged = count_images(ws.lights)
-    else:
-        staged = stage_fits(in_dirs, ws.lights)
-        n_staged = count_fits(ws.lights)
-    print(f"Staged {staged} frames into {ws.lights}")
-    if n_staged < 1:
-        if mode in WIDE_MODES:
-            print("ERROR: No image frames found in the given folder(s).\n"
-                  "  dso-milky-way reads camera/phone stills: .jpg .jpeg .png .tif .tiff .heic\n"
-                  "  Make sure --in points to the folder holding your Milky Way frames.")
-        else:
-            print("ERROR: No .fit or .fits sub-exposure files found in the given folder(s).\n"
-                  "  Make sure --in points to the folder containing your raw FITS frames\n"
-                  "  (e.g. the 'lights' folder from your telescope).")
+    light_kind, light_debayer, cal, ingest_ok = _stage_inputs(mode, args, in_dirs, ws)
+    if not ingest_ok:
         return 1
-    if mode in WIDE_MODES and any(f.suffix.lower() == ".heic" for f in iter_images(ws.lights)):
-        # HEIC (iPhone's default) only decodes if SIRIL was built with libheif — most current builds
-        # are, but flag it up front so a decode failure isn't misread as "too few stars" mid-run.
-        print("  note: HEIC frames detected. SIRIL decodes these only if built with HEIF support "
-              "(most current builds are). If registration reports no frames, export to JPEG/TIFF first.")
 
     # Build the FULL pipeline (preprocess → finish) up front so resume spans the whole run.
     siril = _resolve_tool(cfg, "siril")
@@ -284,11 +352,14 @@ def cmd_mode(args, mode: str) -> int:
     # be mosaics for now; auto-detect from the subs' pointing spread unless --mosaic/--single forces
     # it. Always print the decision so the user can confirm or override (never a silent guess).
     is_mosaic = False if mode in WIDE_MODES else _resolve_assembly(mode, in_dirs[0], args)
-    stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril, is_mosaic=is_mosaic)
+    stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril, is_mosaic=is_mosaic,
+                                     light_kind=light_kind or "fits", light_debayer=light_debayer,
+                                     cal=cal, focal=getattr(args, "focal", None),
+                                     pixel=getattr(args, "pixel", None))
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]
-    lights = iter_images(ws.lights) if mode in WIDE_MODES else iter_fits(ws.lights)
+    lights = iter_images(ws.lights) if mode in WIDE_MODES else iter_lights(ws.lights)
     fp = input_fingerprint(lights)
     # Resume from the on-disk manifest when it still matches (mode/order/fingerprint); else fresh.
     if ws.manifest_path.exists():
