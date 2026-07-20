@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         pm.add_argument("--clean", action="store_true",
                         help="on success, delete working files except the golden anchor "
                              "(reclaims disk; re-finish still works via --from bge/--from finish)")
+        pm.add_argument("--stacked", action="store_true",
+                        help="the input is ALREADY a stacked linear image (e.g. a DSS/Siril "
+                             "integration); skip calibrate/register/stack and run finish only")
         if mode in DSO_MODES:
             # DSLR/mirrorless calibration frames + optics (ignored for Seestar FITS, which needs none).
             pm.add_argument("--darks", default=None, help="folder of dark frames (DSLR calibration)")
@@ -235,6 +238,13 @@ def _stage_inputs(mode, args, in_dirs, ws):
                   "  (.cr2 .cr3 .nef .arw .dng .raf ..., or .tif/.jpg exports).\n"
                   "  Make sure --in points to the folder with your light frames.")
         return light_kind, light_debayer, cal, False
+    if getattr(args, "stacked", False):
+        # Finish-only: exactly one already-stacked image is expected. If more were staged, only the
+        # first becomes the anchor — say so rather than silently dropping the rest.
+        if n_staged > 1:
+            print(f"  WARNING: --stacked expects one already-stacked image; {n_staged} were found, "
+                  f"using only the first. Drop --stacked to stack multiple subs instead.")
+        return light_kind, light_debayer, cal, True
     if mode in WIDE_MODES and any(f.suffix.lower() == ".heic" for f in iter_images(ws.lights)):
         # HEIC (iPhone's default) only decodes if SIRIL was built with libheif — most current builds
         # are, but flag it up front so a decode failure isn't misread as "too few stars" mid-run.
@@ -351,11 +361,11 @@ def cmd_mode(args, mode: str) -> int:
     # Mosaic vs single-panel is a capture attribute (orthogonal to target type). Only galaxies can
     # be mosaics for now; auto-detect from the subs' pointing spread unless --mosaic/--single forces
     # it. Always print the decision so the user can confirm or override (never a silent guess).
-    is_mosaic = False if mode in WIDE_MODES else _resolve_assembly(mode, in_dirs[0], args)
+    is_mosaic = False if (mode in WIDE_MODES or args.stacked) else _resolve_assembly(mode, in_dirs[0], args)
     stages = build_preprocess_stages(mode, ws, cfg, target, siril_exe=siril, is_mosaic=is_mosaic,
                                      light_kind=light_kind or "fits", light_debayer=light_debayer,
                                      cal=cal, focal=getattr(args, "focal", None),
-                                     pixel=getattr(args, "pixel", None))
+                                     pixel=getattr(args, "pixel", None), stacked=args.stacked)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce)
     order = [s.id for s in stages]

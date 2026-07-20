@@ -69,15 +69,17 @@ def emission_finish_cmds(anchor, out_name, *, box, spcc, params=None,
 
 
 def cluster_finish_cmds(anchor, out_name, *, box, spcc, params=None,
-                        catalog="localgaia", jpeg_quality=95) -> list:
+                        catalog="localgaia", jpeg_quality=95, calibrate=True) -> list:
     # §4.8 authored: light denoise + highlight-protected stretch; stars are the subject.
+    # calibrate=False skips the platesolve + SPCC (fallback when the solve can't lock), so the
+    # finish still delivers — the stretch/saturation carry the result without colour calibration.
     p = params or ClusterFinishParams()
+    cal = [f"platesolve -catalog={catalog}", spcc] if calibrate else []
     return [
         f"load {anchor}",
         *crop_cmds(box),
         f"subsky {_g(p.subsky_degree)}",
-        f"platesolve -catalog={catalog}",
-        spcc,
+        *cal,
         f"denoise -mod={_g(p.denoise_mod)}",
         "autostretch -linked",
         f"ght -D={_g(p.ght_d)} -B={_g(p.ght_b)} -HP={_g(p.ght_hp)} -human",

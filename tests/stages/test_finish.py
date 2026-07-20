@@ -170,6 +170,24 @@ def test_emission_finish_auto_crop_emits_crop_command(tmp_path, monkeypatch):
     assert "crop " in text     # crop is in the SIRIL prep script
 
 
+def test_emission_finish_falls_back_without_spcc_when_solve_fails(tmp_path, monkeypatch):
+    # If the plate solve can't lock, the prep produces no _clean.fit -> the finish must retry WITHOUT
+    # platesolve/SPCC (a no-SPCC prep) so it still delivers, rather than aborting the whole run.
+    import aporntool.stages.finish as fin
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite([]))
+    ws = Workspace(tmp_path, "M8"); ws.create()
+    _write_bordered_fits(ws.linear / "M8_Linear.fit")
+    stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
+                                 siril_exe="siril-cli", starnet_exe="starnet2", crop=None, runner=_rec([]))
+    next(s for s in stages if s.id == "finish").run()
+    # The fake runner never writes _clean.fit, so the fallback fires and writes a no-SPCC prep.
+    first = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
+    fallback = (ws.logs / "finish_nospcc.ssf").read_text(encoding="utf-8")
+    assert "platesolve" in first                        # first attempt tries to solve
+    assert "platesolve" not in fallback and "spcc" not in fallback   # fallback skips SPCC
+    assert "denoise" in fallback and "M8_clean" in fallback
+
+
 def test_reflection_finish_stage_does_not_recrop(tmp_path, monkeypatch):
     # Cropping happens once, in the bge stage (SIRIL) before GraXpert. The reflection finish must
     # NOT crop again — an explicit --crop box re-applied to the already-cropped frame would be

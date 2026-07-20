@@ -236,6 +236,17 @@ Notes:
   `--focal`/`--pixel` yet; SPCC may not calibrate DSLR emission/cluster colour without a catalog target.
 - Master **darks/flats/bias** also work for cooled **astro-camera FITS** lights, not just DSLR raw.
 
+Already stacked elsewhere? Add `--stacked` to feed a finished linear integration (from DSS, Siril,
+etc.) straight into the finish — no re-stacking:
+
+```bash
+aporn-tool dso-reflection-nebula --in "/data/PLEIADES_STACKED.tif" --target M45 --stacked --out /data/m45_out
+```
+
+`--stacked` works on any mode and imports the single image as the golden anchor, then runs that mode's
+BGE / StarNet / stretch. (Galaxy and reflection do their SPCC in preprocess, which `--stacked` skips,
+so they use the image's existing colour; emission and star-cluster still colour-calibrate in finish.)
+
 ### 3. Combine multiple nights (more integration = the #1 quality lever)
 
 `--in` is repeatable; all `.fit` from every source are staged and stacked together:

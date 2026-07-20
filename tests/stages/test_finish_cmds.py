@@ -16,6 +16,17 @@ def test_deliverable_saves_all_four():
     assert "savepng M31_final" in j and "savejpg M31_final 95" in j
 
 
+def test_cluster_finish_no_calibrate_skips_platesolve_and_spcc():
+    # The fallback path (calibrate=False) omits the plate solve + SPCC but still stretches and saves.
+    c = cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"', calibrate=False)
+    j = "\n".join(c)
+    assert "platesolve" not in j and "spcc" not in j
+    assert "autostretch -linked" in j and "savejpg M13_final" in j
+    # the default (calibrate=True) still includes the solve + SPCC
+    d = "\n".join(cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"'))
+    assert "platesolve" in d and "spcc" in d
+
+
 def test_mosaic_finish_stretch_star_blend():
     c = mosaic_finish_cmds("M31_clean", "M31_final", star_reduce=0.5)
     j = "\n".join(c)

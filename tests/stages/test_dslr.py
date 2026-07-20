@@ -116,6 +116,32 @@ def test_dslr_no_calibration_frames_skips_masters(tmp_path):
     assert "convert light -out=../01_process" in text and "-debayer" in text
 
 
+def test_stacked_returns_only_import_stage(tmp_path):
+    # Finish-only: a pre-stacked image skips calibrate/register/stack entirely.
+    ws = Workspace(tmp_path, "M45"); ws.create()
+    for mode in ("dso-reflection-nebula", "dso-galaxy", "dso-milky-way"):
+        stages = build_preprocess_stages(mode, ws, Config.default(), resolve_target("M45"),
+                                         siril_exe="siril-cli", light_kind="tiff",
+                                         light_debayer=False, stacked=True)
+        assert [s.id for s in stages] == ["import"], mode
+
+
+def test_stacked_import_loads_and_saves_anchor_no_stacking(tmp_path):
+    ws = Workspace(tmp_path, "M45"); ws.create()
+    scripts = []
+    stages = build_preprocess_stages("dso-reflection-nebula", ws, Config.default(),
+                                     resolve_target("M45"), siril_exe="siril-cli",
+                                     light_kind="tiff", light_debayer=False, stacked=True,
+                                     runner=_rec(scripts))
+    stages[0].run()
+    text = "".join(scripts)
+    assert "convert light -out=../01_process" in text     # any format -> FITS
+    assert "load light_00001" in text and "M45_Linear" in text
+    # no stacking commands (match command forms, not bare words — the temp path contains "stacked")
+    assert "register pp_light" not in text and "calibrate light" not in text
+    assert "stack r_pp_light" not in text
+
+
 def test_dslr_focal_pixel_override_reaches_platesolve(tmp_path):
     # --focal/--pixel must actually reach the SPCC plate solve (else DSLR SPCC solves with Seestar
     # optics and fails). Regression guard for the `focal or cfg.seestar_focal_mm` wiring.

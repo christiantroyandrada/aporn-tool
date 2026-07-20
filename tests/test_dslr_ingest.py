@@ -26,6 +26,14 @@ def test_dso_modes_accept_coords():
     assert args.coords == "350.2,61.2"
 
 
+def test_stacked_flag_available_on_all_modes():
+    # --stacked (finish-only, pre-stacked image) applies to every mode, including Milky Way.
+    for mode in ("dso-galaxy", "dso-emission-nebula", "dso-reflection-nebula",
+                 "dso-star-cluster", "dso-milky-way"):
+        args = build_parser().parse_args([mode, "--in", "/d", "--stacked"])
+        assert args.stacked is True, mode
+
+
 def test_fits_wins_and_ignores_preview_jpg(tmp_path):
     # A Seestar folder holds FITS subs + .jpg previews — must ingest only the FITS (unchanged behavior).
     (tmp_path / "Light_0001.fit").write_bytes(b"x")

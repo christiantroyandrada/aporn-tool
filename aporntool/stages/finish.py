@@ -91,13 +91,21 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             # regardless. Rich Milky-Way fields keep all stars (star_strength default 1.0).
             box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             clean = ws.finish / f"{ws.target}_clean"
-            prep = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
+            gaia = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
                 cfg.catalog_astro and cfg.catalog_photo) else []
-            prep += [f"load {anchor.as_posix()}", *crop_cmds(box),
-                     f"subsky {cfg.pipeline.emission_finish.subsky_degree}",
-                     f"platesolve -catalog={cfg.pipeline.spcc.catalog}", spcc, "denoise",
-                     f"save {clean.as_posix()}"]
-            _siril("finish", prep, cd=str(ws.linear))
+            base = [f"load {anchor.as_posix()}", *crop_cmds(box),
+                    f"subsky {cfg.pipeline.emission_finish.subsky_degree}"]
+            # Try SPCC; if the plate solve can't lock (dense field, no local Gaia, or an already-
+            # stacked frame with no scale header), fall back to no-SPCC so the finish still delivers —
+            # the composite's SCNR + red-preserving saturation render the nebula either way.
+            _siril("finish", gaia + base + [f"platesolve -catalog={cfg.pipeline.spcc.catalog}",
+                                            spcc, "denoise", f"save {clean.as_posix()}"],
+                   cd=str(ws.linear))
+            if not _nonzero(f"{clean.as_posix()}.fit"):
+                print("  WARNING: plate solve / SPCC failed in finish -- proceeding without colour "
+                      "calibration (the composite still renders the nebula).")
+                _siril("finish_nospcc", base + ["denoise", f"save {clean.as_posix()}"],
+                       cd=str(ws.linear))
             run_composite_finish(f"{clean.as_posix()}.fit", out_name, mode="dso-emission-nebula",
                                  starnet_exe=starnet_exe, runner=runner, scratch_dir=str(ws.finish),
                                  star_strength=star_reduce, jpeg_quality=cfg.pipeline.jpeg_quality)
@@ -108,14 +116,23 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         # so no StarNet removal. Straight SIRIL finish (SPCC + light denoise + highlight-protected).
         def _finish():
             box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
-            cmds = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
+            gaia = gaia_catalog_cmds(cfg.catalog_astro, cfg.catalog_photo) if (
                 cfg.catalog_astro and cfg.catalog_photo) else []
-            cmds += cluster_finish_cmds(anchor.as_posix(), out_name, box=box, spcc=spcc,
-                                        params=cfg.pipeline.cluster_finish,
-                                        catalog=cfg.pipeline.spcc.catalog,
-                                        jpeg_quality=cfg.pipeline.jpeg_quality)
-            _siril("finish", cmds, cd=str(ws.linear))
+            # Try SPCC; fall back to no-SPCC if the plate solve can't lock, so the finish still
+            # delivers (the highlight-protected stretch carries the cluster without colour calibration).
+            _siril("finish", gaia + cluster_finish_cmds(
+                anchor.as_posix(), out_name, box=box, spcc=spcc, params=cfg.pipeline.cluster_finish,
+                catalog=cfg.pipeline.spcc.catalog, jpeg_quality=cfg.pipeline.jpeg_quality),
+                cd=str(ws.linear))
             _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
+            if not _all_deliverables(ws):
+                print("  WARNING: plate solve / SPCC failed in finish -- retrying without colour "
+                      "calibration.")
+                _siril("finish_nospcc", gaia + cluster_finish_cmds(
+                    anchor.as_posix(), out_name, box=box, spcc=spcc,
+                    params=cfg.pipeline.cluster_finish, catalog=cfg.pipeline.spcc.catalog,
+                    jpeg_quality=cfg.pipeline.jpeg_quality, calibrate=False), cd=str(ws.linear))
+                _promote_fit_to_fits(ws)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
     elif mode == "dso-reflection-nebula":

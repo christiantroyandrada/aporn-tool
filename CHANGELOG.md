@@ -34,6 +34,20 @@
     flipped, so the mirrorx step is skipped for them.
   - **Seestar path is byte-identical:** with FITS input and no calibration frames, every command is
     exactly as before.
+- **`--stacked` finish-only input.** Feed an already-stacked **linear** image (a FITS/TIFF/PNG/JPEG
+  integration from DSS, Siril, etc.) straight into a mode's finish — BGE, StarNet, stretch — on any
+  mode. It skips calibrate/register/stack (a single frame can't form a SIRIL sequence anyway) and
+  imports the image as the golden anchor via `convert` + `load` + `save`. Note: galaxy/reflection run
+  SPCC in preprocess, which `--stacked` bypasses, so those two skip colour calibration; emission and
+  star-cluster still SPCC in their finish phase.
+
+### Fixed
+- **Emission / star-cluster finish no longer aborts when the plate solve fails.** Their finish does
+  SPCC (platesolve + colour calibration); if the solve can't lock — a dense field, no local Gaia
+  catalog, or an already-stacked frame with no scale header — it now falls back to finishing WITHOUT
+  SPCC and still produces deliverables, instead of failing the whole run. (Emission colour is muted
+  without SPCC; install the local Gaia catalog for calibrated Halpha.) Matches the fault tolerance the
+  preprocess SPCC stage already had.
 
 ## v0.5.0 — 2026-07-15
 

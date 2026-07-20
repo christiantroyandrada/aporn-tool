@@ -132,7 +132,8 @@ def _nonzero(path) -> bool:
 
 
 def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is_mosaic=False,
-                            light_kind="fits", light_debayer=True, cal=None, focal=None, pixel=None):
+                            light_kind="fits", light_debayer=True, cal=None, focal=None, pixel=None,
+                            stacked=False):
     # Build the ordered preprocess stages for this mode, each wired to a SIRIL script that is
     # written into logs/ then run. `runner` is injectable so tests never launch real SIRIL.
     # `is_mosaic` selects the assembly (WCS+feather, no flip) vs single-panel (2-pass + mirrorx);
@@ -152,6 +153,18 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is
         script = write_ssf(text, ws.logs / f"{stage_id}.ssf")
         return run_siril(script, workdir=ws.work, siril_exe=siril_exe, runner=runner,
                          log_path=ws.logs / f"{stage_id}.log")
+
+    anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
+
+    if stacked:
+        # Finish-only: the input is ALREADY a stacked linear image (e.g. a DSS/Siril integration), so
+        # there is nothing to calibrate/register/stack — a single frame can't even form a SIRIL
+        # sequence. Import it as the golden anchor and let the finish stages take over. `convert`
+        # accepts any format (FITS/TIFF/raw/...); `load` of the one frame needs no sequence.
+        def _import_run():
+            _run("import", ["convert light -out=../01_process", "cd ../01_process",
+                            "load light_00001", f"save {anchor_noext}", "close"], cd=str(ws.lights))
+        return [Stage("import", _import_run, lambda: _nonzero(anchor))]
 
     stages = []
     is_wide = mode == "dso-milky-way"
@@ -229,8 +242,6 @@ def build_preprocess_stages(mode, ws, cfg, target, *, siril_exe, runner=None, is
             "register",
             lambda: _run("register", register_cmds(mode, is_mosaic, cfg.pipeline.stack), cd=str(proc)),
             lambda: (proc / "r_pp_light_.seq").exists()))
-
-    anchor_noext = anchor.with_suffix("").as_posix()   # SIRIL `save` appends .fit itself
 
     def _anchor_stage():
         # Save the stacked result straight to the golden anchor — no flip, no SPCC. Used by the
