@@ -4,7 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from aporntool.stages.engine import Stage
-from aporntool.tools.siril import build_ssf, write_ssf, run_siril, spcc_cmd, gaia_catalog_cmds
+from aporntool.tools.siril import build_ssf, write_ssf, run_siril, spcc_cmd, gaia_catalog_cmds, platesolve_cmd
 from aporntool.tools.graxpert import bge_cmd, denoise_cmd, run_graxpert
 from aporntool.stages.finish_cmds import crop_cmds, cluster_finish_cmds, milkyway_finish_cmds
 from aporntool.stages.composite_finish import run_composite_finish
@@ -33,10 +33,17 @@ def _promote_fit_to_fits(ws) -> None:
 
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
-                        starnet_exe=None, crop=None, star_reduce=None, runner=None):
+                        starnet_exe=None, crop=None, star_reduce=None, runner=None,
+                        focal=None, pixel=None):
     runner = runner or subprocess.run
     anchor = ws.linear / f"{ws.target}_Linear"          # SIRIL load name (no .fit)
     out_name = str((ws.out_root / f"{ws.target}_final").as_posix())
+    # Seed the finish plate solve (emission/cluster SPCC) with the target's coords + optics. A blind
+    # solve fails on wide DSLR fields and already-stacked frames; a seeded solve locks reliably. focal/
+    # pixel come from --focal/--pixel (DSLR) or the Seestar defaults.
+    solve = platesolve_cmd(coords=f"{target.ra},{target.dec}",
+                           focal=focal or cfg.seestar_focal_mm, pixel=pixel or cfg.seestar_pixel_um,
+                           catalog=cfg.pipeline.spcc.catalog)
     stages = []
 
     def _siril(stage_id, commands, cd):
@@ -95,11 +102,11 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                 cfg.catalog_astro and cfg.catalog_photo) else []
             base = [f"load {anchor.as_posix()}", *crop_cmds(box),
                     f"subsky {cfg.pipeline.emission_finish.subsky_degree}"]
-            # Try SPCC; if the plate solve can't lock (dense field, no local Gaia, or an already-
-            # stacked frame with no scale header), fall back to no-SPCC so the finish still delivers —
-            # the composite's SCNR + red-preserving saturation render the nebula either way.
-            _siril("finish", gaia + base + [f"platesolve -catalog={cfg.pipeline.spcc.catalog}",
-                                            spcc, "denoise", f"save {clean.as_posix()}"],
+            # Try SPCC (seeded plate solve so it locks on DSLR/stacked frames); if it still can't
+            # solve, fall back to no-SPCC so the finish delivers — the composite's SCNR + red-
+            # preserving saturation render the nebula either way. SIRIL uses the local Gaia catalog
+            # if present and auto-reverts to the online catalogue otherwise.
+            _siril("finish", gaia + base + [solve, spcc, "denoise", f"save {clean.as_posix()}"],
                    cd=str(ws.linear))
             if not _nonzero(f"{clean.as_posix()}.fit"):
                 print("  WARNING: plate solve / SPCC failed in finish -- proceeding without colour "
@@ -121,17 +128,17 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             # Try SPCC; fall back to no-SPCC if the plate solve can't lock, so the finish still
             # delivers (the highlight-protected stretch carries the cluster without colour calibration).
             _siril("finish", gaia + cluster_finish_cmds(
-                anchor.as_posix(), out_name, box=box, spcc=spcc, params=cfg.pipeline.cluster_finish,
-                catalog=cfg.pipeline.spcc.catalog, jpeg_quality=cfg.pipeline.jpeg_quality),
+                anchor.as_posix(), out_name, box=box, spcc=spcc, solve=solve,
+                params=cfg.pipeline.cluster_finish, jpeg_quality=cfg.pipeline.jpeg_quality),
                 cd=str(ws.linear))
             _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
             if not _all_deliverables(ws):
                 print("  WARNING: plate solve / SPCC failed in finish -- retrying without colour "
                       "calibration.")
                 _siril("finish_nospcc", gaia + cluster_finish_cmds(
-                    anchor.as_posix(), out_name, box=box, spcc=spcc,
-                    params=cfg.pipeline.cluster_finish, catalog=cfg.pipeline.spcc.catalog,
-                    jpeg_quality=cfg.pipeline.jpeg_quality, calibrate=False), cd=str(ws.linear))
+                    anchor.as_posix(), out_name, box=box, spcc=spcc, solve=solve,
+                    params=cfg.pipeline.cluster_finish, jpeg_quality=cfg.pipeline.jpeg_quality,
+                    calibrate=False), cd=str(ws.linear))
                 _promote_fit_to_fits(ws)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 

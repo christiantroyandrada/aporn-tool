@@ -68,13 +68,14 @@ def emission_finish_cmds(anchor, out_name, *, box, spcc, params=None,
     ] + deliverable_save_cmds(out_name, jpeg_quality)
 
 
-def cluster_finish_cmds(anchor, out_name, *, box, spcc, params=None,
-                        catalog="localgaia", jpeg_quality=95, calibrate=True) -> list:
+def cluster_finish_cmds(anchor, out_name, *, box, spcc, solve, params=None,
+                        jpeg_quality=95, calibrate=True) -> list:
     # §4.8 authored: light denoise + highlight-protected stretch; stars are the subject.
-    # calibrate=False skips the platesolve + SPCC (fallback when the solve can't lock), so the
-    # finish still delivers — the stretch/saturation carry the result without colour calibration.
+    # `solve` is the (seeded) platesolve command. calibrate=False skips the platesolve + SPCC
+    # (fallback when the solve can't lock), so the finish still delivers — the stretch/saturation
+    # carry the result without colour calibration.
     p = params or ClusterFinishParams()
-    cal = [f"platesolve -catalog={catalog}", spcc] if calibrate else []
+    cal = [solve, spcc] if calibrate else []
     return [
         f"load {anchor}",
         *crop_cmds(box),

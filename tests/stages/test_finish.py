@@ -170,6 +170,22 @@ def test_emission_finish_auto_crop_emits_crop_command(tmp_path, monkeypatch):
     assert "crop " in text     # crop is in the SIRIL prep script
 
 
+def test_emission_finish_platesolve_is_seeded(tmp_path, monkeypatch):
+    # The finish plate solve must be SEEDED with the target coords + optics (a blind solve fails on
+    # DSLR/stacked frames). Regression guard for the emission/cluster finish SPCC fix.
+    import aporntool.stages.finish as fin
+    monkeypatch.setattr(fin, "run_composite_finish", _capture_composite([]))
+    ws = Workspace(tmp_path, "M8"); ws.create()
+    _write_bordered_fits(ws.linear / "M8_Linear.fit")
+    stages = build_finish_stages("dso-emission-nebula", ws, Config.default(), resolve_target("M8"),
+                                 siril_exe="siril-cli", starnet_exe="starnet2", crop=None,
+                                 focal=300, pixel=4.29, runner=_rec([]))
+    next(s for s in stages if s.id == "finish").run()
+    text = (ws.logs / "finish.ssf").read_text(encoding="utf-8")
+    assert "platesolve 271.43,-24.41" in text          # M8 catalog coords -> seeded, not blind
+    assert "-focal=300" in text and "-pixelsize=4.29" in text
+
+
 def test_emission_finish_falls_back_without_spcc_when_solve_fails(tmp_path, monkeypatch):
     # If the plate solve can't lock, the prep produces no _clean.fit -> the finish must retry WITHOUT
     # platesolve/SPCC (a no-SPCC prep) so it still delivers, rather than aborting the whole run.

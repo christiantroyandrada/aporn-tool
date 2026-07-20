@@ -39,7 +39,7 @@ def test_finish_defaults_identical():
     assert m[9] == 'pm "$O_starless$+$starmask_O_stretched$*0.5"'
     assert emission_finish_cmds("A", "O", box=None, spcc="S")[1:3] == ["subsky 1", "platesolve -catalog=localgaia"]
     assert emission_finish_cmds("A", "O", box=None, spcc="S")[6] == "satu 0.7 0.1"
-    c = cluster_finish_cmds("A", "O", box=None, spcc="S")
+    c = cluster_finish_cmds("A", "O", box=None, spcc="S", solve="P")
     assert c[4] == "denoise -mod=0.5" and c[6] == "ght -D=0.7 -B=3 -HP=0.9 -human" and c[7] == "satu 0.6 0.1"
 
 
@@ -81,7 +81,7 @@ def test_emission_cluster_overrides():
     e = emission_finish_cmds("A", "O", box=None, spcc="S",
                              params=EmissionFinishParams(satu=0.4, satu_bg=0.2))
     assert e[6] == "satu 0.4 0.2"
-    c = cluster_finish_cmds("A", "O", box=None, spcc="S",
+    c = cluster_finish_cmds("A", "O", box=None, spcc="S", solve="P",
                             params=ClusterFinishParams(denoise_mod=0.9, ght_d=0.6, ght_b=4,
                                                        ght_hp=0.8, satu=0.5, satu_bg=0.3))
     assert c[4] == "denoise -mod=0.9" and c[6] == "ght -D=0.6 -B=4 -HP=0.8 -human" and c[7] == "satu 0.5 0.3"

@@ -17,14 +17,17 @@ def test_deliverable_saves_all_four():
 
 
 def test_cluster_finish_no_calibrate_skips_platesolve_and_spcc():
-    # The fallback path (calibrate=False) omits the plate solve + SPCC but still stretches and saves.
-    c = cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"', calibrate=False)
+    # The fallback path (calibrate=False) omits the (seeded) plate solve + SPCC but still stretches/saves.
+    solve = "platesolve 250.4,36.4 -focal=300 -pixelsize=4.29 -catalog=localgaia"
+    c = cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"', solve=solve,
+                            calibrate=False)
     j = "\n".join(c)
     assert "platesolve" not in j and "spcc" not in j
     assert "autostretch -linked" in j and "savejpg M13_final" in j
-    # the default (calibrate=True) still includes the solve + SPCC
-    d = "\n".join(cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"'))
-    assert "platesolve" in d and "spcc" in d
+    # the default (calibrate=True) includes the seeded solve + SPCC
+    d = "\n".join(cluster_finish_cmds("M13", "M13_final", box=None, spcc='spcc "-oscsensor=x"',
+                                      solve=solve))
+    assert solve in d and "spcc" in d
 
 
 def test_mosaic_finish_stretch_star_blend():
@@ -51,7 +54,8 @@ def test_emission_finish_keeps_stars_and_spccs():
 
 def test_cluster_finish_light_denoise_and_ght():
     c = cluster_finish_cmds("M13_Linear", "M13_final", box=None,
-                            spcc='spcc "-oscsensor=Sony IMX662" -catalog=localgaia')
+                            spcc='spcc "-oscsensor=Sony IMX662" -catalog=localgaia',
+                            solve="platesolve 250.4,36.4 -catalog=localgaia")
     j = "\n".join(c)
     assert "denoise -mod=0.5" in j
     assert "ght -D=0.7" in j and "-HP=0.9" in j
