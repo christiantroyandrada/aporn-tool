@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.0 — unreleased
+## v0.6.0 — 2026-07-20
 
 ### Added
 - **New `dso-milky-way` mode: wide-field Milky Way from a phone or camera.** It ingests already-

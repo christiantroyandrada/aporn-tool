@@ -1,6 +1,6 @@
 [project]
 name = "aporn-tool"                     # PyPI distribution name (pip install aporn-tool); the import package + command stay `aporntool`
-version = "0.5.0"
+version = "0.6.0"
 description = "Astropornography tool - one command from raw subs to a finished astrophoto"
 readme = "README.md"
 requires-python = ">=3.10"
