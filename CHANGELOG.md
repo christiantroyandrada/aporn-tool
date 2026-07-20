@@ -42,12 +42,15 @@
   star-cluster still SPCC in their finish phase.
 
 ### Fixed
-- **Emission / star-cluster finish no longer aborts when the plate solve fails.** Their finish does
-  SPCC (platesolve + colour calibration); if the solve can't lock — a dense field, no local Gaia
-  catalog, or an already-stacked frame with no scale header — it now falls back to finishing WITHOUT
-  SPCC and still produces deliverables, instead of failing the whole run. (Emission colour is muted
-  without SPCC; install the local Gaia catalog for calibrated Halpha.) Matches the fault tolerance the
-  preprocess SPCC stage already had.
+- **Emission / star-cluster finish now seeds its plate solve** with the target coords + `--focal`/
+  `--pixel`, instead of a blind solve that failed (`invalid input image`) on wide DSLR fields and
+  already-stacked frames — so SPCC actually runs on DSLR/`--stacked` data. SIRIL resolves the Gaia
+  catalog itself (local if present, else it reverts to the online catalogue), giving a
+  local → remote → skip chain.
+- **...and no longer aborts when the solve still can't lock.** If SPCC fails anyway (truly offline,
+  or an unsolvable frame), the finish falls back to finishing WITHOUT SPCC and still produces
+  deliverables, matching the fault tolerance the preprocess SPCC stage already had. (Set your camera
+  under `pipeline.spcc.sensor` in the config for accurate DSLR colour.)
 
 ## v0.5.0 — 2026-07-15
 

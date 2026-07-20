@@ -235,6 +235,14 @@ Notes:
   preprocess there). Emission/star-cluster solve blind in the finish phase, so those two don't use
   `--focal`/`--pixel` yet; SPCC may not calibrate DSLR emission/cluster colour without a catalog target.
 - Master **darks/flats/bias** also work for cooled **astro-camera FITS** lights, not just DSLR raw.
+- For accurate SPCC colour, set your camera under `pipeline.spcc.sensor` in the config (e.g.
+  `"Canon EOS 2000D"` for a T7). SPCC uses the local Gaia catalog if installed, otherwise it reverts
+  to the online Gaia catalogue automatically.
+- **Emission targets need the right camera.** Nebulae like the Rosette or Orion are mostly
+  hydrogen-alpha (656 nm), which a **stock (unmodified) DSLR's IR-cut filter largely blocks** — you
+  can't process in red that wasn't captured. For strong Halpha, use an astro-modified camera or a
+  dual-band/Ha filter. Broadband targets (star clusters, reflection nebulae like the Pleiades,
+  galaxies, the Milky Way) are unaffected.
 
 Already stacked elsewhere? Add `--stacked` to feed a finished linear integration (from DSS, Siril,
 etc.) straight into the finish — no re-stacking:
