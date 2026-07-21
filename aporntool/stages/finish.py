@@ -1,4 +1,5 @@
 """Assemble per-mode finish stages: golden anchor → deliverables at the --out root."""
+import glob
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -9,6 +10,7 @@ from aporntool.tools.graxpert import bge_cmd, denoise_cmd, run_graxpert
 from aporntool.stages.finish_cmds import crop_cmds, cluster_finish_cmds, milkyway_finish_cmds
 from aporntool.stages.composite_finish import run_composite_finish
 from aporntool.stages.reflection_finish import run_reflection_finish
+from aporntool.stages.foreground import run_foreground_deghost
 from aporntool.stages.crop import resolve_crop
 
 
@@ -34,7 +36,7 @@ def _promote_fit_to_fits(ws) -> None:
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                         starnet_exe=None, crop=None, star_reduce=None, runner=None,
-                        focal=None, pixel=None):
+                        focal=None, pixel=None, no_tripod=False):
     runner = runner or subprocess.run
     anchor = ws.linear / f"{ws.target}_Linear"          # SIRIL load name (no .fit)
     out_name = str((ws.out_root / f"{ws.target}_final").as_posix())
@@ -183,6 +185,8 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
         mw = cfg.pipeline.milkyway_finish
         # bge: crop (SIRIL, trims the rotation-blurred registration border) then GraXpert BGE. High
         # bge_smoothing keeps the large-scale Milky Way band from being subtracted as "background".
+        # The de-ghost stage below MUST resolve the SAME crop (cfg.pipeline.crop) so its mask and
+        # foreground line up pixel-for-pixel with this cropped sky.
         def _bge():
             box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
             _siril("crop", [f"load {anchor.as_posix()}",
@@ -208,6 +212,35 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                    cd=str(ws.linear))
             _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
+
+        if no_tripod:
+            # Handheld capture: the finished deliverables have a sharp DEEP SKY but a GHOSTED
+            # foreground (star-aligned stacking smears the fixed house/trees/wires). Recover a sharp
+            # foreground from a single frame while keeping the stacked sky. Runs after 'finish' and
+            # overwrites the four deliverables. A marker gates resume (this stage edits, not creates,
+            # so it can't use _all_deliverables as its done-check — those already exist from finish).
+            done_marker = ws.finish / ".deghost_done"
+
+            def _deghost():
+                regs = sorted(glob.glob(str(ws.process / "r_pp_light_*.fit")))
+                ref = ws.process / "r_pp_light_00001.fit"
+                ws.finish.mkdir(parents=True, exist_ok=True)
+                if len(regs) < 2 or not ref.exists():
+                    # No registered frames (e.g. --stacked input, or a --clean'd workspace on resume):
+                    # nothing to de-ghost against. Leave the deliverables as-is and say why (P2).
+                    print("  note: --no-tripod needs the registered frames (r_pp_light_*.fit) and "
+                          "found none; keeping the stacked result unchanged. (Not applicable to "
+                          "--stacked input or a cleaned workspace.)")
+                    done_marker.write_text("skipped: no registered frames")
+                    return
+                box = resolve_crop(crop, f"{anchor.as_posix()}.fit", cfg.pipeline.crop)
+                cov = run_foreground_deghost(
+                    f"{out_name}.tif", regs, str(ref), crop_box=box, out_stem=out_name,
+                    params=asdict(cfg.pipeline.no_tripod), jpeg_quality=cfg.pipeline.jpeg_quality)
+                print(f"  --no-tripod: recovered a sharp foreground ({cov * 100:.0f}% of frame) "
+                      f"from one frame; deep sky kept from the {len(regs)}-frame stack.")
+                done_marker.write_text("done")
+            stages.append(Stage("deghost", _deghost, done_marker.exists))
 
     return stages
 

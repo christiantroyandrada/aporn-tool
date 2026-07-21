@@ -107,6 +107,28 @@ def test_milky_way_finish_stage_ids(tmp_path):
     assert [s.id for s in stages] == ["bge", "denoise", "finish"]
 
 
+def test_milky_way_no_tripod_appends_deghost_stage(tmp_path):
+    # --no-tripod adds a foreground de-ghost stage AFTER finish (it edits the deliverables).
+    ws = Workspace(tmp_path, "MilkyWay"); ws.create()
+    stages = build_finish_stages("dso-milky-way", ws, Config.default(), resolve_target_wide(None),
+                                 siril_exe="siril-cli", graxpert_exe="GraXpert", no_tripod=True)
+    assert [s.id for s in stages] == ["bge", "denoise", "finish", "deghost"]
+
+
+def test_no_tripod_deghost_skips_gracefully_without_registered_frames(tmp_path, capsys):
+    # If the registered frames are absent (e.g. --stacked input or a cleaned workspace), the de-ghost
+    # stage must NOT crash — it leaves the stacked deliverables untouched and says why (P2), and its
+    # done-marker is written so resume treats it as complete.
+    ws = Workspace(tmp_path, "MilkyWay"); ws.create()
+    stages = build_finish_stages("dso-milky-way", ws, Config.default(), resolve_target_wide(None),
+                                 siril_exe="siril-cli", graxpert_exe="GraXpert", no_tripod=True)
+    deghost = next(s for s in stages if s.id == "deghost")
+    assert not deghost.produces()          # not done yet
+    deghost.run()
+    assert deghost.produces()              # marker written -> resume sees it as done
+    assert "registered frames" in capsys.readouterr().out.lower()
+
+
 def test_milky_way_bge_uses_high_smoothing_to_protect_the_band(tmp_path, monkeypatch):
     # GraXpert BGE on a wide MW must run with the milkyway_finish smoothing (high by default), or it
     # subtracts the Milky Way itself as "background". Capture the bge command GraXpert is handed.
@@ -155,6 +177,6 @@ def test_milkyway_finish_cmds_shape():
     cmds = milkyway_finish_cmds("clean.fits", "out", jpeg_quality=90)
     assert cmds[0] == "load clean.fits"
     joined = " ".join(cmds)
-    assert "autostretch -linked -2.5 0.2" in joined      # config defaults, _g-formatted
+    assert "autostretch -linked -2.9 0.1" in joined      # config defaults, _g-formatted
     assert "savejpg out 90" in joined
     assert "starnet" not in joined

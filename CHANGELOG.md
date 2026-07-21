@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.6.1 — 2026-07-21
+
+### Added
+- **`dso-milky-way --no-tripod`: recover a sharp foreground from a hand-held Milky Way stack.**
+  Star-aligned stacking sharpens the sky but SMEARS the fixed foreground (house / trees / wires)
+  into a ghost, because a hand-held camera drifts between frames. `--no-tripod` keeps the deep
+  **stacked** sky and paints the foreground back in from a **single** frame.
+  - **How the foreground is found (no horizon line to draw):** the per-pixel variance ACROSS the
+    registered frames is the ghost signal — the sky is aligned (still), the foreground moves. The
+    sky is the low-variance region flood-filled from the image centre (the Milky Way is always
+    roughly centred); building interiors are flat (low variance) but walled off by their own
+    roofline ridge, so they stay foreground. Works whether the foreground is along the bottom, the
+    side, or scattered rooftops. Registration-jittered stars are size-filtered back into the sky.
+  - **Pipeline:** adds a `deghost` stage after `finish` (only with `--no-tripod`); everything
+    upstream is unchanged. If the registered frames are unavailable (e.g. `--stacked` input or a
+    `--clean`ed workspace), the stage is a no-op that leaves the stacked result untouched and says so.
+  - **Robustness:** a foreground component is kept only if it is large enough AND touches a frame
+    edge. Real foreground (ground / buildings) always sits against an edge; an interior low-variance
+    patch walled off from the centre seed by a spurious variance ridge (a cloud band, or an over-tight
+    crop clipping the ragged registration border) is sky, not foreground — without this guard it
+    renders as a black blob. Tiny islands (registration-jittered stars) fold back to sky the same way.
+  - **Ragged border:** hand-held drift leaves a wider colour-fringed partial-coverage border than a
+    tripod/Seestar. The default auto-crop keeps that border (rendered as a mild sky fringe) rather
+    than risk clipping part-way into it — a partial cut leaves a high-variance fragment at the new
+    edge that walls off a corner into a black blob, and the safe "crop past the border" amount is
+    data-dependent. For a clean, fringe-free framing, pass an explicit `--crop "X Y W H"` box.
+  - **Config:** new `pipeline.no_tripod` block (variance-barrier percentile, feather, star-island
+    size filter, foreground stretch/gain, handheld crop aggressiveness). Defaults are tuned for a
+    tight edge-hugging mask and a dark, silhouetted foreground (validated against a real hand-held
+    nightscape).
+  - **Why not a registration change:** battle-testing on real hand-held frames showed the existing
+    single-pass homography registration already registers the most frames; every "robustness" flag
+    (2-pass reference selection, `affine`/`similarity`, higher `maxstars`) registered *fewer*. Star
+    registration is invariant to inter-frame shift/rotation by design, so the sky was never the
+    problem — only the fixed foreground is, and that is what this feature fixes.
+
+### Changed
+- **`dso-milky-way` finish now renders a darker sky with the Milky Way popping against it.** The
+  `milkyway_finish` defaults moved from `autostretch_bg 0.20 / clip -2.5 / satu 0.5` (which left a
+  washed grey sky) to `0.10 / -2.9 / 0.85`, validated against a real hand-held nightscape. Override
+  under `pipeline.milkyway_finish` as before.
+
 ## v0.6.0 — 2026-07-20
 
 ### Added

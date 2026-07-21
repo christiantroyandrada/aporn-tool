@@ -7,7 +7,7 @@ from pathlib import Path
 
 from aporntool.config import (
     Config, load_config, StackParams, MosaicFinishParams, EmissionFinishParams,
-    ClusterFinishParams, ReflectionFinishParams,
+    ClusterFinishParams, ReflectionFinishParams, NoTripodParams,
 )
 from aporntool.stages.preprocess import register_cmds, stack_cmds, build_preprocess_stages
 from aporntool.stages.finish_cmds import mosaic_finish_cmds, emission_finish_cmds, cluster_finish_cmds
@@ -105,6 +105,18 @@ def test_newly_centralized_param_overrides():
 def test_reflection_params_mirror_defaults_no_drift():
     from aporntool.stages.reflection_finish import REFLECTION_DEFAULTS
     assert asdict(ReflectionFinishParams()) == REFLECTION_DEFAULTS
+
+
+def test_no_tripod_params_default_and_overlay_from_file(tmp_path):
+    # Default config carries a no_tripod block; a partial file overlays onto it without disturbing
+    # the rest (same partial-overlay guarantee every other params block has).
+    assert isinstance(Config.default().pipeline.no_tripod, NoTripodParams)
+    cfgpath = tmp_path / "c.json"
+    cfgpath.write_text(json.dumps({"pipeline": {"no_tripod": {"feather": 12.0, "fg_gain": 0.5}}}))
+    cfg = load_config(cfgpath)
+    assert cfg.pipeline.no_tripod.feather == 12.0
+    assert cfg.pipeline.no_tripod.fg_gain == 0.5
+    assert cfg.pipeline.no_tripod.barrier_pct == NoTripodParams().barrier_pct   # untouched default
 
 
 def test_target_blocks_zero_is_floored_not_fatal(tmp_path):
