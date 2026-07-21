@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from aporntool.tools.graxpert import bge_cmd, denoise_cmd, fix_double_ext, run_graxpert
 
@@ -57,3 +58,26 @@ def test_run_graxpert_size_poll_waits_then_returns(tmp_path):
                          settle=1.0, poll=0.5, sleep=lambda s: slept.append(s))
     assert final == tmp_path / "out.fits" and final.exists()
     assert slept                                  # the poll actually ran
+
+
+def test_run_graxpert_passes_proc_timeout_to_subprocess(tmp_path):
+    # The GraXpert subprocess must be bounded — run_graxpert forwards proc_timeout to the runner.
+    seen = {}
+    def fake_runner(cmd, **kw):
+        seen["timeout"] = kw.get("timeout")
+        (tmp_path / "out.fits.fits").write_text("d", encoding="utf-8")
+        class R: returncode = 0; stdout = ""; stderr = ""
+        return R()
+    run_graxpert(["G"], tmp_path / "out", runner=fake_runner, proc_timeout=42.0)
+    assert seen["timeout"] == 42.0
+
+
+def test_run_graxpert_timeout_fails_cleanly_not_hang(tmp_path, capsys):
+    # A hung GraXpert (subprocess timeout) must not block forever: catch TimeoutExpired, warn, and
+    # return the (missing) output path so the stage's produces() check fails cleanly.
+    def hung_runner(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 1))
+    final = run_graxpert(["G", "-cli"], tmp_path / "out", runner=hung_runner, proc_timeout=1.0)
+    assert final == tmp_path / "out.fits"         # returned, did not raise/hang
+    assert not final.exists()                     # no output -> upstream stage fails, not hangs
+    assert "did not finish" in capsys.readouterr().out.lower()

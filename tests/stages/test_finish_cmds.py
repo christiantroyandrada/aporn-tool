@@ -58,5 +58,8 @@ def test_cluster_finish_light_denoise_and_ght():
                             solve="platesolve 250.4,36.4 -catalog=localgaia")
     j = "\n".join(c)
     assert "denoise -mod=0.5" in j
+    # Explicit dark background target (not a bare autostretch) so a light-polluted DSLR stack's
+    # skyglow doesn't wash the cluster background to grey; the GHT below still lifts the stars.
+    assert "autostretch -linked -2.8 0.12" in j
     assert "ght -D=0.7" in j and "-HP=0.9" in j
     assert "satu 0.6 0.1" in j and "starnet" not in j

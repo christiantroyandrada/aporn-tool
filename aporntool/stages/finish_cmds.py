@@ -82,7 +82,7 @@ def cluster_finish_cmds(anchor, out_name, *, box, spcc, solve, params=None,
         f"subsky {_g(p.subsky_degree)}",
         *cal,
         f"denoise -mod={_g(p.denoise_mod)}",
-        "autostretch -linked",
+        f"autostretch -linked {_g(p.autostretch_clip)} {_g(p.autostretch_bg)}",
         f"ght -D={_g(p.ght_d)} -B={_g(p.ght_b)} -HP={_g(p.ght_hp)} -human",
         f"satu {_g(p.satu)} {_g(p.satu_bg)}",
     ] + deliverable_save_cmds(out_name, jpeg_quality)
