@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.2.post1 — 2026-07-21
+
+Post-release: **no code change from 0.6.2** — documentation only.
+
+### Docs
+- Added Troubleshooting entries for the GraXpert hang guard ("GraXpert hangs / did not finish on a
+  big image") and the cluster dark-background fix ("star cluster looks washed-out / grey sky"), so
+  they appear on the published package page too.
+
 ## v0.6.2 — 2026-07-21
 
 ### Fixed
