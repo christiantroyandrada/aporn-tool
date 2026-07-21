@@ -531,6 +531,8 @@ the roadmap.
 | SPCC "no stars" / imprecise | Install the Gaia region matching the target (Milky Way vs Galaxy Season). |
 | `--out path must not contain spaces` | Choose a space-free output folder (SIRIL limitation). |
 | `golden anchor not found` on `--from`/`--redo` | Run the full pipeline first (drop `--from`/`--redo`) so preprocess produces the anchor. |
+| GraXpert hangs / "did not finish" on a big image | Very large DSLR stacks (e.g. 24MP+) can exhaust memory and stall GraXpert. 0.6.2+ caps it with a timeout and fails the stage cleanly — downscale the `--stacked` image (or free memory) and re-run. |
+| Star cluster looks washed-out / grey sky | On a light-polluted DSLR/`--stacked` stack, 0.6.2+ stretches `dso-star-cluster` to a dark background automatically. On older versions, or to tune, set `pipeline.cluster_finish.autostretch_bg` lower (e.g. `0.10`). |
 | Plate-solving fails on a mosaic | Ensure SIRIL's astrometry catalog is installed; the tool verifies solves by frame count, not exit code. |
 | Noisy/ragged band left after auto-crop | Known mosaic limitation (brightness-based crop misses low-coverage edges). Pass `--crop "X Y W H"`, or crop in post. |
 
