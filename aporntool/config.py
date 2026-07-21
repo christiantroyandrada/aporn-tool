@@ -69,6 +69,13 @@ class EmissionFinishParams:
 class ClusterFinishParams:
     subsky_degree: int = 1            # `subsky <degree>` gradient polynomial
     denoise_mod: float = 0.5          # `denoise -mod=` (light — stars are the subject)
+    # Explicit autostretch shadow-clip + background target. Bare `autostretch -linked` lets SIRIL
+    # pick a bright default background, which on a light-polluted DSLR stack lifts the residual
+    # skyglow to a washed grey; a firm clip + low target sets the sky dark (the highlight-protected
+    # GHT below still lifts the cluster stars). A clean Seestar background is near-flat, so this is
+    # ~no-op there and only bites the light-polluted case.
+    autostretch_clip: float = -2.8
+    autostretch_bg: float = 0.12
     ght_d: float = 0.7
     ght_b: float = 3.0
     ght_hp: float = 0.9

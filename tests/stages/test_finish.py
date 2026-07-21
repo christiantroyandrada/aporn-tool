@@ -55,6 +55,29 @@ def test_emission_finish_is_single_stage(tmp_path):
     assert [s.id for s in stages] == ["finish"]
 
 
+def _cluster_autostretch_line(tmp_path, **kw):
+    # Run the cluster finish with a fake SIRIL and return its autostretch command line.
+    ws = Workspace(tmp_path, "M13"); ws.create()
+    _write_bordered_fits(ws.linear / "M13_Linear.fit")
+    scripts = []
+    stages = build_finish_stages("dso-star-cluster", ws, Config.default(), resolve_target("M31"),
+                                 siril_exe="siril-cli", crop=None, runner=_rec(scripts), **kw)
+    next(s for s in stages if s.id == "finish").run()
+    for s in scripts:
+        for ln in s.splitlines():
+            if ln.startswith("autostretch -linked"):
+                return ln
+    return None
+
+
+def test_cluster_dark_background_gated_by_input_kind(tmp_path):
+    # Seestar FITS cluster keeps the BARE autostretch (byte-identical to pre-0.6.2); a DSLR/--stacked
+    # (light-polluted) cluster gets the explicit dark background target so it isn't washed grey.
+    assert _cluster_autostretch_line(tmp_path / "seestar") == "autostretch -linked"          # default FITS
+    assert _cluster_autostretch_line(tmp_path / "stacked", stacked=True) == "autostretch -linked -2.8 0.12"
+    assert _cluster_autostretch_line(tmp_path / "dslr", light_kind="raw") == "autostretch -linked -2.8 0.12"
+
+
 def test_emission_finish_preps_spcc_then_runs_composite(tmp_path, monkeypatch):
     # Emission now: a SIRIL prep (crop/subsky/SPCC/denoise -> _clean.fit) THEN the composite
     # dual-layer finish. The prep ssf carries the SPCC; deliverables come from the composite.

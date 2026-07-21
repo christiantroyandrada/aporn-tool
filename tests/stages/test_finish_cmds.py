@@ -58,5 +58,18 @@ def test_cluster_finish_light_denoise_and_ght():
                             solve="platesolve 250.4,36.4 -catalog=localgaia")
     j = "\n".join(c)
     assert "denoise -mod=0.5" in j
+    # Default (Seestar FITS) keeps the proven BARE autostretch — byte-identical to pre-0.6.2.
+    assert "autostretch -linked\n" in j + "\n"
+    assert "autostretch -linked -2.8" not in j
     assert "ght -D=0.7" in j and "-HP=0.9" in j
     assert "satu 0.6 0.1" in j and "starnet" not in j
+
+
+def test_cluster_finish_dark_background_for_light_polluted_input():
+    # DSLR / --stacked callers pass dark_background=True -> explicit dark autostretch target so a
+    # light-polluted stack's skyglow doesn't wash the cluster background to grey.
+    c = cluster_finish_cmds("M45_Linear", "M45_final", box=None, spcc="S",
+                            solve="platesolve 56.9,24.1", dark_background=True)
+    j = "\n".join(c)
+    assert "autostretch -linked -2.8 0.12" in j     # explicit dark target
+    assert "ght -D=0.7" in j                          # GHT still lifts the cluster stars
