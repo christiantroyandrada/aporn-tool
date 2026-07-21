@@ -3,14 +3,16 @@
 ## v0.6.2 — 2026-07-21
 
 ### Fixed
-- **`dso-star-cluster` no longer washes the background out on a light-polluted (e.g. DSLR) stack.**
-  The cluster finish used a bare `autostretch -linked`, which lets SIRIL pick a bright default
-  background — on a stack with residual skyglow that lifted the sky to a milky grey. It now stretches
-  to an explicit dark background target (`ClusterFinishParams.autostretch_clip` / `autostretch_bg`,
-  default `-2.8 / 0.12`) while the highlight-protected GHT still lifts the cluster stars, so the sky
-  reads dark and the reflection nebulosity pops. A clean (near-flat) Seestar background is ~unaffected;
-  tune under `pipeline.cluster_finish`. (`dso-emission-nebula` was already dark via its composite
-  finish and is unchanged.)
+- **`dso-star-cluster` no longer washes the background out on a light-polluted (DSLR / `--stacked`)
+  stack.** The cluster finish used a bare `autostretch -linked`, which lets SIRIL pick a bright
+  default background — on a stack with residual skyglow that lifted the sky to a milky grey. For
+  **DSLR / `--stacked`** input it now stretches to an explicit dark background target
+  (`ClusterFinishParams.autostretch_clip` / `autostretch_bg`, default `-2.8 / 0.12`) while the
+  highlight-protected GHT still lifts the cluster stars, so the sky reads dark and the reflection
+  nebulosity pops. **Scoped to that input only: a Seestar FITS cluster keeps the bare autostretch and
+  is byte-identical to before** (no regression to the proven Seestar path). Tune under
+  `pipeline.cluster_finish`. (`dso-emission-nebula` was already dark via its composite finish and is
+  unchanged.)
 - **GraXpert can no longer hang the whole pipeline.** `run_graxpert` now caps the GraXpert subprocess
   with a timeout (`proc_timeout`, default 1200s): a GraXpert that stalls (e.g. it runs out of memory
   on a very large DSLR image and never exits) is terminated and the stage fails cleanly with an

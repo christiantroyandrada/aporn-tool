@@ -375,7 +375,8 @@ def cmd_mode(args, mode: str) -> int:
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce,
                                   focal=getattr(args, "focal", None), pixel=getattr(args, "pixel", None),
-                                  no_tripod=getattr(args, "no_tripod", False))
+                                  no_tripod=getattr(args, "no_tripod", False),
+                                  light_kind=light_kind or "fits", stacked=args.stacked)
     order = [s.id for s in stages]
     lights = iter_images(ws.lights) if mode in WIDE_MODES else iter_lights(ws.lights)
     fp = input_fingerprint(lights)

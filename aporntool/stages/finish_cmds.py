@@ -69,20 +69,27 @@ def emission_finish_cmds(anchor, out_name, *, box, spcc, params=None,
 
 
 def cluster_finish_cmds(anchor, out_name, *, box, spcc, solve, params=None,
-                        jpeg_quality=95, calibrate=True) -> list:
+                        jpeg_quality=95, calibrate=True, dark_background=False) -> list:
     # §4.8 authored: light denoise + highlight-protected stretch; stars are the subject.
     # `solve` is the (seeded) platesolve command. calibrate=False skips the platesolve + SPCC
     # (fallback when the solve can't lock), so the finish still delivers — the stretch/saturation
     # carry the result without colour calibration.
+    # `dark_background` sets an explicit dark autostretch target instead of a bare autostretch: a
+    # light-polluted (DSLR / --stacked) stack has residual skyglow that a bare autostretch lifts to a
+    # washed grey, so those callers pass True. A clean Seestar FITS background does NOT need it, so it
+    # stays bare there — keeping the proven Seestar cluster output byte-identical (the GHT below lifts
+    # the cluster stars in both cases).
     p = params or ClusterFinishParams()
     cal = [solve, spcc] if calibrate else []
+    stretch = (f"autostretch -linked {_g(p.autostretch_clip)} {_g(p.autostretch_bg)}"
+               if dark_background else "autostretch -linked")
     return [
         f"load {anchor}",
         *crop_cmds(box),
         f"subsky {_g(p.subsky_degree)}",
         *cal,
         f"denoise -mod={_g(p.denoise_mod)}",
-        f"autostretch -linked {_g(p.autostretch_clip)} {_g(p.autostretch_bg)}",
+        stretch,
         f"ght -D={_g(p.ght_d)} -B={_g(p.ght_b)} -HP={_g(p.ght_hp)} -human",
         f"satu {_g(p.satu)} {_g(p.satu_bg)}",
     ] + deliverable_save_cmds(out_name, jpeg_quality)

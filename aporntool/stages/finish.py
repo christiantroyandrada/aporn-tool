@@ -36,7 +36,12 @@ def _promote_fit_to_fits(ws) -> None:
 
 def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                         starnet_exe=None, crop=None, star_reduce=None, runner=None,
-                        focal=None, pixel=None, no_tripod=False):
+                        focal=None, pixel=None, no_tripod=False, light_kind="fits", stacked=False):
+    # `light_kind`/`stacked` describe the input source. They drive the cluster dark-background gate:
+    # a light-polluted DSLR/--stacked cluster stack needs the dark autostretch target, while a clean
+    # Seestar FITS cluster keeps its proven bare autostretch (byte-identical). Default to the Seestar
+    # case so callers that don't pass them are unchanged.
+    cluster_dark_bg = (light_kind != "fits") or stacked
     runner = runner or subprocess.run
     anchor = ws.linear / f"{ws.target}_Linear"          # SIRIL load name (no .fit)
     out_name = str((ws.out_root / f"{ws.target}_final").as_posix())
@@ -131,7 +136,8 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
             # delivers (the highlight-protected stretch carries the cluster without colour calibration).
             _siril("finish", gaia + cluster_finish_cmds(
                 anchor.as_posix(), out_name, box=box, spcc=spcc, solve=solve,
-                params=cfg.pipeline.cluster_finish, jpeg_quality=cfg.pipeline.jpeg_quality),
+                params=cfg.pipeline.cluster_finish, jpeg_quality=cfg.pipeline.jpeg_quality,
+                dark_background=cluster_dark_bg),
                 cd=str(ws.linear))
             _promote_fit_to_fits(ws)   # SIRIL `save` writes .fit; FR-27 deliverable name is .fits
             if not _all_deliverables(ws):
@@ -140,7 +146,7 @@ def build_finish_stages(mode, ws, cfg, target, *, siril_exe, graxpert_exe=None,
                 _siril("finish_nospcc", gaia + cluster_finish_cmds(
                     anchor.as_posix(), out_name, box=box, spcc=spcc, solve=solve,
                     params=cfg.pipeline.cluster_finish, jpeg_quality=cfg.pipeline.jpeg_quality,
-                    calibrate=False), cd=str(ws.linear))
+                    calibrate=False, dark_background=cluster_dark_bg), cd=str(ws.linear))
                 _promote_fit_to_fits(ws)
         stages.append(Stage("finish", _finish, lambda: _all_deliverables(ws)))
 
