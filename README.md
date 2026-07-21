@@ -197,11 +197,27 @@ of FITS subs — no `--target` needed (the run is just named `MilkyWay`):
 aporn-tool dso-milky-way --in "/path/to/phone shots"
 ```
 
-How to shoot for it: prop the phone on something steady (a tripod, a ledge, a bag), point at the
-Milky Way, and take a dozen or more frames of the **same** framing (Night Mode or a long-exposure app
-gives the most signal). The tool aligns on the stars, so a fixed foreground (rooftops, trees) will
-blur as the sky rotates — that's expected; the payoff is a much cleaner, more detailed galactic core.
-More frames = less noise. Needs SIRIL + GraXpert (no StarNet, no Gaia catalog).
+How to shoot for it: point at the Milky Way and take a dozen or more frames of roughly the **same**
+framing (Night Mode or a long-exposure app gives the most signal). The tool aligns on the stars, so
+even a hand-held burst stacks fine — star registration is invariant to the shift and rotation between
+frames. More frames = less noise. Needs SIRIL + GraXpert (no StarNet, no Gaia catalog).
+
+**Hand-held? Add `--no-tripod`.** Because the tool aligns on the *stars*, a *fixed* foreground
+(rooftops, trees, wires) smears into a ghost as the framing drifts between hand-held frames — that is
+the one thing star-aligned stacking can't fix. `--no-tripod` recovers a sharp foreground: it keeps the
+deep **stacked** sky but paints the foreground back in from a **single** frame.
+
+```bash
+aporn-tool dso-milky-way --in "/path/to/phone shots" --out ~/Pictures/mw_out --no-tripod
+```
+
+It finds the foreground automatically from how much each pixel *moves* between the registered frames
+(the sky is aligned = still; the foreground drifts = moving) — no horizon line to draw, and it works
+whether your foreground is along the bottom, the side, or scattered rooftops. Hand-held drift also
+leaves a wider ragged, colour-fringed border around the stack. For a clean, fringe-free framing, pass
+an explicit `--crop "X Y W H"` box that crops *past* that border (the default auto-crop keeps the
+border as a mild sky fringe rather than risk clipping into it). On a real tripod, leave `--no-tripod`
+off (there's no ghost to fix). Tuning knobs live under `pipeline.no_tripod` in the config.
 
 Two practical notes:
 - **Output path with spaces:** phone shots often live under a spaced path (e.g. `~/Pictures/Milky Way`),
@@ -370,6 +386,7 @@ aporn-tool <command> [options]
 | `--bias PATH` | folder of bias/offset frames (DSLR calibration; DSO modes) |
 | `--focal MM` | focal length (mm) for the SPCC plate solve (DSLR; default: Seestar) |
 | `--pixel UM` | pixel size (microns) for the SPCC plate solve (DSLR; default: Seestar) |
+| `--no-tripod` | hand-held Milky Way: recover a sharp foreground from one frame, de-ghosting the house/trees/wires (`dso-milky-way` only) |
 | `--clean` | on success, delete working files except the golden anchor (reclaims disk) |
 | `--from STAGE` | restart at this stage |
 | `--redo STAGE` | re-run this stage + everything downstream |
@@ -393,7 +410,7 @@ Stage names are **per-mode**. Run `aporn-tool status` to see yours. Current orde
 | `dso-reflection-nebula` | `calibrate → register → stack → spcc → bge → denoise → finish` |
 | `dso-emission-nebula` | `calibrate → register → stack → mirrorx → finish` |
 | `dso-star-cluster` | `calibrate → register → stack → mirrorx → finish` |
-| `dso-milky-way` | `register → stack → anchor → bge → denoise → finish` (convert is merged into register; no calibrate/mirrorx/SPCC) |
+| `dso-milky-way` | `register → stack → anchor → bge → denoise → finish` (convert is merged into register; no calibrate/mirrorx/SPCC); **`--no-tripod` appends `→ deghost`** |
 
 A stage is only marked `done` after its output is verified (exists, non-empty, right type). A
 crash or a raising stage is marked `failed` and reported with the log tail. Re-run to resume.
@@ -454,6 +471,8 @@ aporn-tool config --check     # same, and verify Siril/GraXpert/StarNet are disc
     "emission_finish":   { "subsky_degree": 1, "satu": 0.7, "satu_bg": 0.1 },
     "cluster_finish":    { "subsky_degree": 1, "denoise_mod": 0.5, "ght_d": 0.7, "ght_b": 3.0, "ght_hp": 0.9, "satu": 0.6, "satu_bg": 0.1 },
     "reflection_finish": { "target_bg": 0.35, "shadows_clip": -2.8, "sat_r": 0.30, "sat_g": 1.3, "sat_b": 4.5, "midboost": 0.55, "lc": 1.3, "bgpull": 0.08, "gamma": 0.85, "bg_desat": 0.14, "bg_desat_soft": 0.14, "st_bright": 1.5, "st_sat": 1.2 },
+    "milkyway_finish":   { "bge_smoothing": 1.0, "bge_correction": "Subtraction", "denoise_strength": 0.8, "autostretch_clip": -2.9, "autostretch_bg": 0.10, "rmgreen": 1.0, "satu": 0.85, "satu_bg": 0.1 },
+    "no_tripod":         { "barrier_pct": 85.0, "barrier_dilate": 4, "feather": 12.0, "min_island_frac": 0.002, "fg_target_bg": 0.10, "fg_shadows_clip": -1.8, "fg_gain": 0.6 },
     "jpeg_quality": 95
   }
 }

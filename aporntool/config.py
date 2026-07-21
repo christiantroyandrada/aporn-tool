@@ -105,11 +105,45 @@ class MilkyWayFinishParams:
     bge_smoothing: float = 1.0        # HIGH on purpose: keep GraXpert BGE from eating the MW band
     bge_correction: str = "Subtraction"
     denoise_strength: float = 0.8
-    autostretch_clip: float = -2.5    # `autostretch -linked <clip> <bg>`
-    autostretch_bg: float = 0.20
+    # A dark background with the Milky Way popping against it (validated against a real hand-held
+    # nightscape). A high shadow clip crushes residual light-pollution skyglow toward black; a low
+    # target background keeps the sky dark; a firm saturation brings out the galactic-core colour and
+    # the blue sky. (v0.6.0 shipped 0.20 / -2.5 / 0.5, which left the sky a washed grey.)
+    autostretch_clip: float = -2.9    # `autostretch -linked <clip> <bg>`
+    autostretch_bg: float = 0.10
     rmgreen: float = 1.0              # neutralise skyglow green cast
-    satu: float = 0.5                 # gentle saturation (phone colour is already processed)
+    satu: float = 0.85               # bring out the galactic-core colour + blue sky
     satu_bg: float = 0.1
+
+
+@dataclass
+class NoTripodParams:
+    # Handheld wide-field foreground de-ghost (dso-milky-way --no-tripod). Star-aligned stacking
+    # sharpens the sky but SMEARS the fixed foreground (house/trees/wires) into a ghost, because the
+    # camera drifts between handheld frames. Recovery: keep the deep STACKED sky, but paint a sharp
+    # SINGLE frame back into the foreground. The foreground is found from the per-pixel variance
+    # ACROSS the registered frames (the sky is aligned = low variance; the foreground moves = high
+    # variance) — no horizon/brightness assumption. The sky is the low-variance region flood-filled
+    # from the image centre (the Milky Way target is always roughly centred); building interiors are
+    # flat (low variance) but walled off by their own roofline ridge, so they stay OUTSIDE the sky.
+    barrier_pct: float = 85.0        # variance percentile above which a pixel is a foreground "ridge"
+                                     # (roofline / wire / light / thin ghosted pole) that walls off sky
+    barrier_dilate: int = 4          # dilate the ridges so they form continuous, gap-free barriers
+    feather: float = 12.0            # Gaussian feather (px) of the sky/foreground transition — tight
+                                     # so the boundary hugs the silhouette (a wide feather haloed it)
+    min_island_frac: float = 0.002   # foreground islands smaller than this frac of the frame are
+                                     # registration-jittered stars, not foreground -> fold back to sky
+    fg_target_bg: float = 0.10       # autostretch background for the single-frame foreground
+    fg_shadows_clip: float = -1.8    # autostretch shadow clip for the foreground
+    fg_gain: float = 0.6             # multiply the foreground toward a darker silhouette (matches a
+                                     # real nightscape + hides the near-horizon skyglow the mask pulls in)
+    # NOTE on the ragged hand-held border: we deliberately do NOT auto-crop harder for --no-tripod.
+    # The single-pass (framing=current) stack leaves a wide, colour-fringed partial-coverage border.
+    # Keeping the FULL border (the shared pipeline.crop default) is safe — the flood-fill reaches the
+    # corners and renders them as (mild) sky fringe. But cropping PART-way into that border leaves a
+    # high-variance fragment at the new edge that walls off a corner and renders it as a black blob,
+    # and the safe "crop past the border entirely" amount is data-dependent. So automatic fringe
+    # removal isn't robust: for a clean, fringe-free framing pass an explicit --crop "X Y W H" box.
 
 
 @dataclass
@@ -123,6 +157,7 @@ class PipelineParams:
     cluster_finish: ClusterFinishParams = field(default_factory=ClusterFinishParams)
     reflection_finish: ReflectionFinishParams = field(default_factory=ReflectionFinishParams)
     milkyway_finish: MilkyWayFinishParams = field(default_factory=MilkyWayFinishParams)
+    no_tripod: NoTripodParams = field(default_factory=NoTripodParams)
     jpeg_quality: int = 95            # deliverable .jpg quality, all modes
 
 

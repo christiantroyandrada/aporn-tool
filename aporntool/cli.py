@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
             pm.add_argument("--coords", default=None,
                             help="target RA,DEC in decimal degrees, for a target not in the built-in "
                                  "catalog (DSLR raw has no OBJECT header)")
+        if mode in WIDE_MODES:
+            # Handheld wide-field: recover a sharp single-frame foreground (de-ghost the house /
+            # trees / wires that star-aligned stacking smears) while keeping the deep stacked sky.
+            pm.add_argument("--no-tripod", action="store_true",
+                            help="handheld capture: recover a sharp foreground from a single frame "
+                                 "(de-ghost the house/trees/wires) while keeping the stacked sky")
     return parser
 
 
@@ -368,7 +374,8 @@ def cmd_mode(args, mode: str) -> int:
                                      pixel=getattr(args, "pixel", None), stacked=args.stacked)
     stages += build_finish_stages(mode, ws, cfg, target, siril_exe=siril, graxpert_exe=graxpert,
                                   starnet_exe=starnet, crop=crop, star_reduce=args.star_reduce,
-                                  focal=getattr(args, "focal", None), pixel=getattr(args, "pixel", None))
+                                  focal=getattr(args, "focal", None), pixel=getattr(args, "pixel", None),
+                                  no_tripod=getattr(args, "no_tripod", False))
     order = [s.id for s in stages]
     lights = iter_images(ws.lights) if mode in WIDE_MODES else iter_lights(ws.lights)
     fp = input_fingerprint(lights)

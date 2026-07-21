@@ -220,6 +220,24 @@ def test_coords_flag_accepted_for_dslr_targets(tmp_path):
     assert args.coords == "1,2"
 
 
+def test_no_tripod_flag_parses_for_wide_mode_and_defaults_false():
+    from aporntool.cli import build_parser
+    p = build_parser()
+    a = p.parse_args(["dso-milky-way", "--in", "x", "--no-tripod"])
+    assert a.no_tripod is True
+    b = p.parse_args(["dso-milky-way", "--in", "x"])
+    assert b.no_tripod is False
+
+
+def test_no_tripod_flag_rejected_for_dso_modes():
+    # --no-tripod is wide-field only (handheld nightscape); a telescope DSO mode must not accept it.
+    import pytest
+    from aporntool.cli import build_parser
+    p = build_parser()
+    with pytest.raises(SystemExit):
+        p.parse_args(["dso-galaxy", "--in", "x", "--no-tripod"])
+
+
 def test_clean_does_not_fire_on_failure(tmp_path, monkeypatch):
     # If the pipeline fails, --clean must NOT delete working files (resume must still work).
     _install_fakes(monkeypatch, tmp_path)
