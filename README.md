@@ -472,7 +472,7 @@ aporn-tool config --check     # same, and verify Siril/GraXpert/StarNet are disc
     "cluster_finish":    { "subsky_degree": 1, "denoise_mod": 0.5, "autostretch_clip": -2.8, "autostretch_bg": 0.12, "ght_d": 0.7, "ght_b": 3.0, "ght_hp": 0.9, "satu": 0.6, "satu_bg": 0.1 },
     "reflection_finish": { "target_bg": 0.35, "shadows_clip": -2.8, "sat_r": 0.30, "sat_g": 1.3, "sat_b": 4.5, "midboost": 0.55, "lc": 1.3, "bgpull": 0.08, "gamma": 0.85, "bg_desat": 0.14, "bg_desat_soft": 0.14, "st_bright": 1.5, "st_sat": 1.2 },
     "milkyway_finish":   { "bge_smoothing": 1.0, "bge_correction": "Subtraction", "denoise_strength": 0.8, "autostretch_clip": -2.9, "autostretch_bg": 0.10, "rmgreen": 1.0, "satu": 0.85, "satu_bg": 0.1 },
-    "no_tripod":         { "barrier_pct": 85.0, "barrier_dilate": 4, "feather": 12.0, "min_island_frac": 0.002, "fg_target_bg": 0.10, "fg_shadows_clip": -1.8, "fg_gain": 0.6 },
+    "no_tripod":         { "variance_sigma": 2.5, "barrier_pct": 80.0, "barrier_dilate": 4, "feather": 12.0, "min_island_frac": 0.0004, "fg_target_bg": 0.10, "fg_shadows_clip": -1.8, "fg_gain": 0.6 },
     "jpeg_quality": 95
   }
 }

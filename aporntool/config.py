@@ -133,13 +133,19 @@ class NoTripodParams:
     # variance) — no horizon/brightness assumption. The sky is the low-variance region flood-filled
     # from the image centre (the Milky Way target is always roughly centred); building interiors are
     # flat (low variance) but walled off by their own roofline ridge, so they stay OUTSIDE the sky.
-    barrier_pct: float = 85.0        # variance percentile above which a pixel is a foreground "ridge"
+    variance_sigma: float = 2.5      # Gaussian smoothing (px) of the inter-frame variance map. LOW so
+                                     # thin foreground (overhead wires, poles) keeps its variance and is
+                                     # caught; a large sigma dilutes thin lines below the barrier and
+                                     # leaves them ghosted. (0.6.2 used a hard-coded 6, which missed wires.)
+    barrier_pct: float = 80.0        # variance percentile above which a pixel is a foreground "ridge"
                                      # (roofline / wire / light / thin ghosted pole) that walls off sky
     barrier_dilate: int = 4          # dilate the ridges so they form continuous, gap-free barriers
     feather: float = 12.0            # Gaussian feather (px) of the sky/foreground transition — tight
                                      # so the boundary hugs the silhouette (a wide feather haloed it)
-    min_island_frac: float = 0.002   # foreground islands smaller than this frac of the frame are
-                                     # registration-jittered stars, not foreground -> fold back to sky
+    min_island_frac: float = 0.0004  # foreground islands smaller than this frac of the frame fold back
+                                     # to sky (registration-jittered stars). Low enough to KEEP thin
+                                     # wires (long => more total area than a compact star) but still drop
+                                     # stars — the size gate separates elongated wires from round stars.
     fg_target_bg: float = 0.10       # autostretch background for the single-frame foreground
     fg_shadows_clip: float = -1.8    # autostretch shadow clip for the foreground
     fg_gain: float = 0.6             # multiply the foreground toward a darker silhouette (matches a

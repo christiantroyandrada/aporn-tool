@@ -43,10 +43,13 @@ def _crop_slices(crop_box, h, w):
     return slice(y, y + ch), slice(x, x + cw)
 
 
-def sky_mask(lumas, *, barrier_pct=88.0, barrier_dilate=8, feather=35.0, min_island_frac=0.002):
+def sky_mask(lumas, *, barrier_pct=88.0, barrier_dilate=8, feather=35.0, min_island_frac=0.002,
+             variance_sigma=6.0):
     # lumas: array-like [N, H, W] of per-frame normalised luminance. Returns a feathered sky mask
     # [H, W] in 0..1 (1 = deep sky to keep from the stack, 0 = foreground to take from one frame).
-    std = gaussian_filter(np.asarray(lumas, np.float64).std(0), sigma=6)
+    # variance_sigma smooths the inter-frame variance map; keep it small so thin foreground (wires)
+    # survives (a large sigma blurs thin lines below the barrier threshold, leaving them ghosted).
+    std = gaussian_filter(np.asarray(lumas, np.float64).std(0), sigma=variance_sigma)
     h, w = std.shape
     barrier = std > np.percentile(std, barrier_pct)
     if barrier_dilate:
@@ -110,7 +113,8 @@ def run_foreground_deghost(sky_deliverable, registered_paths, reference_path, *,
                     barrier_pct=p.get("barrier_pct", 88.0),
                     barrier_dilate=p.get("barrier_dilate", 8),
                     feather=p.get("feather", 35.0),
-                    min_island_frac=p.get("min_island_frac", 0.002))
+                    min_island_frac=p.get("min_island_frac", 0.002),
+                    variance_sigma=p.get("variance_sigma", 6.0))
     if mask.shape != (H, W):
         # The mask is built from the registered frames cropped with the SAME box the crop stage used,
         # so a shape mismatch means the box and the finished sky disagree — surface it, don't guess.
