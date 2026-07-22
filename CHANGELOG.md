@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.3 — 2026-07-21
+
+### Fixed
+- **`dso-milky-way --no-tripod` now de-ghosts thin foreground too (overhead wires, poles), not just
+  solid structures.** The inter-frame variance map was smoothed with a hard-coded `sigma=6`, which
+  blurred thin lines below the detection threshold and left them as a ghosted fan. Smoothing is now
+  configurable (`pipeline.no_tripod.variance_sigma`, default `2.5`) and the foreground detection was
+  retuned to keep thin features: `barrier_pct` 85→80 and `min_island_frac` 0.002→0.0004. The size
+  gate still separates round stars (dropped) from elongated wires (kept, since a wire has far more
+  connected length than a compact star). Validated on the 17-frame hand-held Milky Way set — the
+  overhead-wire fan collapses to clean single-frame lines. `--no-tripod` only; other modes unchanged.
+
 ## v0.6.2.post1 — 2026-07-21
 
 Post-release: **no code change from 0.6.2** — documentation only.

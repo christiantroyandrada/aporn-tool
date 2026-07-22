@@ -40,6 +40,23 @@ def test_sky_mask_walls_off_flat_foreground_interior():
     assert m[15, 50] < 0.2      # building interior = foreground despite being flat
 
 
+def test_sky_mask_variance_sigma_captures_thin_wire_and_is_wired():
+    # A thin high-variance vertical band (a ghosted overhead wire) that touches the top/bottom edges.
+    # A small variance_sigma keeps its sharp variance so it's captured as foreground; the parameter
+    # must actually feed the smoothing (a different sigma yields a different mask). On the real data a
+    # sigma of 6 blurred such wires below the barrier and left them ghosted — 2.5 catches them.
+    n, h, w = 6, 120, 120
+    frames = np.full((n, h, w), 0.5, np.float64)
+    for i in range(n):
+        frames[i, :, 58:61] = 0.05 + 0.6 * (i % 2)   # thin vertical band, alternating -> high variance
+    tight = sky_mask(frames, barrier_pct=80, barrier_dilate=1, feather=1.0,
+                     min_island_frac=0.0, variance_sigma=1.0)
+    wide = sky_mask(frames, barrier_pct=80, barrier_dilate=1, feather=1.0,
+                    min_island_frac=0.0, variance_sigma=14.0)
+    assert tight[60, 59] < 0.4                  # small sigma: the thin wire is captured (foreground)
+    assert not np.allclose(tight, wide)         # variance_sigma actually feeds the smoothing
+
+
 def test_sky_mask_folds_interior_walled_blob_back_into_sky():
     # A high-variance patch that does NOT touch any frame edge is a sky region walled off from the
     # centre seed (spurious ridge / over-tight crop), not foreground. It must be reclassified as sky,
